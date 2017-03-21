@@ -90,7 +90,7 @@ The skeleton uses the following dependencies: [libigl](http://libigl.github.io/l
 git clone --recursive https://github.com/avaxman/INFOMGP-Practical2.git
 ```
 
-to compile the environment, go into the `practical1` folder and enter in a terminal (macOS/Linux):
+to compile the environment, go into the `practical2` folder and enter in a terminal (macOS/Linux):
 
 ```bash
 mkdir build
@@ -151,15 +151,7 @@ Where:
 
 The file describes a set of attachment constraints as follows: every line `m1 v1 m2 v2` adds an attachment constraint for each coordinate (so 3 constraints in total per line) between vertex `v1` in mesh `m1` and vertex `v2` in mesh `v2`. The indices are mesh-relative, not raw (see below)
 
-###User interface
 
-![screenshot of viewer](viewer-shot-practical1.png "screenshot of viewer")
-
-The viewer presents the loaded scene, and you may interact with the viewing with the mouse: rotate with the left button pressed and moving around (the "[" and "]" buttons change the behaviour of the trackball), zoom with the mousewheel, and translate with the right button pressed and dragging. Some other options are printed to the output when the program starts.
-
-The menu also controls the visual features, and the setting of the coefficient of restitution and the time step. They can be updated at any point in the simulation. You might add more parameters with some extensions. Everything is set up in `main()`.
-
-The simluation can be run in two modes: continuously, toggled with the `space` key (to stop/run), and step by step, with the `S` key. This behavior is already encoded. The visual update of the scene from the objects is also already encoded in `updateScene()`
 
 ###Indexing
 

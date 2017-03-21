@@ -100,18 +100,17 @@ int main(int argc, char *argv[])
 
     
     // Load scene
-    if (argc<3){
-        cout<<"Please provide name of folder and scene file!"<<endl;
+    if (argc<2){
+        cout<<"Please provide name of scene file!"<<endl;
         return 0;
     }
-    cout<<"data folder: "<<std::string(argv[1])<<endl;
-    cout<<"scene file: "<<std::string(argv[2])<<endl;
+    cout<<"scene file: "<<std::string(argv[1])<<endl;
     
     
     //create platform
     createPlatform(100.0, 10.0);
     
-    scene.loadScene(std::string(argv[1]), std::string(argv[2]),platWidth, platHeight, attachM1, attachV1, attachM2, attachV2);
+    scene.loadScene(std::string(DATA_PATH), std::string(argv[1]),platWidth, platHeight, attachM1, attachV1, attachM2, attachV2);
     
     //scene.addMesh(platV, platF, 10000.0, true, platCOM, platOrientation);*/
     scene.updateScene(0.0, CRCoeff, X,T, tolerance,maxConstraintIterations, platX, platT);

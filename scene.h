@@ -94,7 +94,7 @@ public:
         /***************
          TODO
          ***************/
-        meshes[i].currImpulses.setZero();
+        currImpulses.setZero();
     }
     
 
@@ -109,7 +109,6 @@ public:
          ***************/
         
         igl::per_vertex_normals(currX, T, currNormals);
-        cout<<"integrated currX"<<currX<<endl;
     }
     
     

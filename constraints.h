@@ -45,7 +45,6 @@ public:
         currGradient=VectorXd::Zero(particleIndices.size());
         invMassMatrix.resize(1,1); invMassMatrix(0,0)=invMass;
         radii.resize(1); radii(0)=radius;
-        violated=false;
     }
     
         
