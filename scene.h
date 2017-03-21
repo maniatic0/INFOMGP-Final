@@ -8,11 +8,37 @@
 #include "constraints.h"
 #include "auxfunctions.h"
 #include <igl/per_vertex_normals.h>
+#include <igl/edge_topology.h>
 #include "volInt.h"
 
 using namespace Eigen;
 using namespace std;
 
+
+void ConstructEFi(const MatrixXi& FE, const MatrixXi& EF, MatrixXi& EFi, MatrixXd& FESigns)
+{
+    
+    EFi=MatrixXi::Constant(EF.rows(), 2,-1);
+    FESigns=MatrixXd::Zero(FE.rows(),FE.cols());
+    for (int i=0;i<EF.rows();i++)
+        for (int k=0;k<2;k++){
+            if (EF(i,k)==-1)
+                continue;
+            
+            for (int j=0;j<3;j++)
+                if (FE(EF(i,k),j)==i)
+                    EFi(i,k)=j;
+        }
+    
+    
+    //doing edge signs
+    for (int i=0;i<EF.rows();i++){
+        if (EFi(i,0)!=-1) FESigns(EF(i,0),EFi(i,0))=1.0;
+        if (EFi(i,1)!=-1) FESigns(EF(i,1),EFi(i,1))=-1.0;
+    }
+    
+    
+}
 
 
 //the class the contains each individual rigid objects and their functionality
@@ -136,17 +162,16 @@ public:
         rigidity=_rigidity;
         currVel=MatrixXd::Zero(origX.rows(),3);
         currImpulses=MatrixXd::Zero(origX.rows(),3);
-  
-		RowVector3d naturalCOM;  //by the geometry of the object
-		Matrix3d invIT; //it is not used in this practical
-		double mass; //as well
-
-        //initializes the origianl geometry (COM + IT) of the object. the invIT is a stub here (bu you may want to use it).
-		getCOMandInvIT(origX, T, density, mass, naturalCOM, invIT);
-
-		origX.rowwise() -= naturalCOM;  //removing the natural COM of the OFF file (natural COM is never used again)
-    
-        //applying the user-prescribed COM+orientation
+        
+        RowVector3d naturalCOM;  //by the geometry of the object
+        Matrix3d invIT; //it is not used in this practical
+        double mass; //as well
+        
+        //initializes the origianl geometry (COM + IT) of the object
+        getCOMandInvIT(origX, T, density, mass, naturalCOM, invIT);
+        
+        origX.rowwise() -= naturalCOM;  //removing the natural COM of the OFF file (natural COM is never used again)
+        
         currX.resize(origX.rows(), 3);
         for (int i=0;i<currX.rows();i++)
             currX.row(i)<<QRot(origX.row(i), userOrientation)+userCOM;
@@ -154,7 +179,6 @@ public:
         prevX=currX;
         
         //dynamics initialization
-        //the masses are set to the area of the third of each triangle adjacent to each vertex,summed up for the vertex, and multiplied with density
         VectorXd A;
         igl::doublearea(currX,T,A);
         VectorXd massV=VectorXd::Zero(currX.rows());
@@ -164,9 +188,10 @@ public:
         }
         
         massV*=density/3.0;
+        //massV.setOnes();
         invMasses=1.0/massV.array();
         
-        //radii are set so every vertex coveres at least half of every adjacent edge
+        //radii are the maximum half-edge lengths
         radii=VectorXd::Zero(currX.rows());
         for (int i=0;i<T.rows();i++){
             for (int j=0;j<3;j++){
@@ -176,21 +201,40 @@ public:
             }
         }
         
-        
         igl::per_vertex_normals(currX, T, currNormals);
         
+        MatrixXi EV;
+        MatrixXi FE;
+        MatrixXi EF;
+        MatrixXi EFi;
+        MatrixXd FESigns;
         
-        //create mesh rigidity constraints. Note the usage of the raw indexing
-		for (int i=0; i<T.rows();i++)
-			for (int j=0; j<3; j++) {
-				VectorXi particleIndices(6); particleIndices << 3*T(i,j), 3*T(i,j)+1, 3*T(i,j)+2, 3*T(i,(j+1)%3), 3*T(i,(j+1)%3)+1, 3*T(i,(j+1)%3)+2;
-                particleIndices.array()+=rawOffset;
-				VectorXd rawRadii(6); rawRadii << radii(T(i, j)), radii(T(i, j)), radii(T(i, j)), radii(T(i, (j + 1) % 3)), radii(T(i, (j + 1) % 3)), radii(T(i, (j + 1) % 3));
-				VectorXd rawInvMasses(6); rawInvMasses << invMasses(T(i, j)), invMasses(T(i, j)), invMasses(T(i, j)), invMasses(T(i, (j + 1) % 3)), invMasses(T(i, (j + 1) % 3)), invMasses(T(i, (j + 1) % 3));
-				double edgeLength = (currX.row(T(i, j)) - currX.row(T(i, (j + 1) % 3))).norm();
-				meshConstraints.push_back(Constraint(RIGIDITY, particleIndices, rawRadii, rawInvMasses, edgeLength, 1.0));
-
-			}
+        igl::edge_topology(currX,T,EV, FE,EF);
+        ConstructEFi(FE, EF, EFi, FESigns);
+        
+        for (int i=0;i<EV.rows();i++){
+            int f=EF(i,0);
+            int g=EF(i,1);
+            
+            //from the side i->k
+            int v[4];
+            v[0]=EV(i,0);
+            v[1]=EV(i,1);
+            v[2]=T(g,(EFi(i,1)+2)%3);
+            v[3]=T(f,(EFi(i,0)+2)%3);
+            for (int j=0;j<4;j++){
+                for (int k=j+1;k<4;k++){
+                    VectorXi particleIndices(6); particleIndices << 3*v[j], 3*v[j]+1, 3*v[j]+2, 3*v[k], 3*v[k]+1, 3*v[k]+2;
+                    particleIndices.array()+=rawOffset;
+                    VectorXd rawRadii(6); rawRadii << radii(v[j]), radii(v[j]), radii(v[j]), radii(v[k]), radii(v[k]), radii(v[k]);
+                    VectorXd rawInvMasses(6); rawInvMasses << invMasses(v[j]), invMasses(v[j]), invMasses(v[j]), invMasses(v[k]), invMasses(v[k]), invMasses(v[k]);
+                    double edgeLength = (currX.row(v[j]) - currX.row(v[k])).norm();
+                    meshConstraints.push_back(Constraint(RIGIDITY, particleIndices, rawRadii, rawInvMasses, edgeLength, 1.0));
+                }
+            }
+            
+        }
+        
     }
     
     ~Mesh(){}
@@ -296,7 +340,7 @@ public:
         
         
         //3. Resolving constraints iteratively until the system is valid (all constraints are below "tolerance" , or passed maxIteration*fullConstraints.size() iterations
-        //add proper impulses to rawImpulses for the corrections
+        //add proper impulses to rawImpulses for the corrections (CRCoeff*posDiff/timeStep). Don't do that on the initialization step.
         /***************
         TODO
         ***************/
