@@ -4,6 +4,8 @@
 
 ##Deadline: 4/Apr/2017 09:00AM.
 
+*Note: demos have been added to the `demo` subfolder.*
+
 The second practical will be about simulating systems of particles that are attached together by constraints, within the position-based framework. The objective of the practical are:
 
 1. Implement sequential position-based constraint resolution.
