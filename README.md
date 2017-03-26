@@ -59,7 +59,7 @@ The practical includes the following basic mandatory requirements:
 <br />
 3. For every time step, update the velocities to match the positions (the position-based step).
 <br />
-4. Apply impulses from collision (see discussion) to change the velocities abruptly.
+4. Apply impulses from collision to change the velocities abruptly. This is a hack, but it works reasonable: for every position change $\Delta x$ induced by correcting a constraint, create impulse to a velocity change of $CR \cdot \frac{\Delta x}{\Delta t}$. Remember that impulses are only aggregated at this stage, and integrated in step (1) of this algorithm.
 
 
 See below for details on where to do all that in the code.
@@ -222,8 +222,21 @@ The practical will be checked during the lecture time of the deadline date. Ever
 
 Here are detailed answers to common questions. Please read through whenever you have a problem, since in most cases someone else would have had it as well.
 
-<span style="color:blue">Q:</span> 
-<span style="color:blue">A:</span> 
+<span style="color:blue">Q: </span> How do I apply impulses to collisions, as in the first practical? it's never really mentioned in the slides.
+<span style="color:blue">A:</span> It is indeed not, since this is not an inherent part of position-based dynamics. What you should do in this practical is an addition described in the algorithm in these instruction, and referred to in the code when needed, of adding impulses upon position fixing.
+
+<span style="color:blue">Q: </span> The demo doesn't run like the exercise.
+<span style="color:blue">A:</span> The demo needs also the DATA folder as the input, because of some compilation issues; see readme in the `demo` subfolder. It was the same in practical 1.
+
+<span style="color:blue">Q: </span> Are `currNormals` used for collision solving and impulse giving?
+<span style="color:blue">A:</span> They are only used for the sophisticated collision resolution (extension 5). Otherwise, the supposed collision normal is implicitly given because the collision resolution just moves the objects in the direction of pushing the particle centers away. The resulting $\Delta x$ would be the normal (but this is not handled as a specific case, as this is not an explicit rigid-body simulation; it is just the result of the position-based approach).
+
+
+<span style="color:blue">Q: </span> How do we "translate" the constraint formulas we have for each constraint to currGradient and currValue
+<span style="color:blue">A:</span> currValue is a scalar wth the value of the constraint. currGradient is an $n$ vector, if $n$ are the participating variables, and each entry $i$ of the vector is $\frac{\partial C}{\partial p_i}$, where $p_i$ is the participating variable. See lengthy discussion above. Remember that a position is 3 different $x,y,z$ variables.
+
+
+
 
 
 #Good work!
