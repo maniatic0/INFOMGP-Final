@@ -1,83 +1,105 @@
-# Practical 2: Position-Based Dynamics
+# Practical 2: Finite-Element Soft-Body deformation with constraints
 
-##Handout date: 21/Mar/2017.
+##Handout date: 16/Mar/2018.
 
-##Deadline: 4/Apr/2017 09:00AM.
+##Deadline: 27/Mar/2017 09:00AM.
 
-*Note: demos have been added to the `demo` subfolder.*
 
-The second practical will be about simulating systems of particles that are attached together by constraints, within the position-based framework. The objective of the practical are:
+The second practical is about simulating soft bodies with the finite-element method learned in class. In addition, the system will handle barrier, collision, and user-based distance constraints.
 
-1. Implement sequential position-based constraint resolution.
- <br />
-2. Integrate and couple velocities and positions.
- <br />
+
+The objective of the practical are:
+
+1. Implement the full finite-element dynamic equation integration, to creat soft-body internal forces on a tetrahedral mesh.
+</br>
+2. Implement sequential velocity and position impulse-based system for constraint resolution.
+</br>
 3. Extend the framework with some chosen effects.  
 
 This is the repository for the skeleton on which you will build your practical. Using CMake allows you to work and submit your code in all platforms. This is practically the same system as in the previous practical, in terms of compilation and setup.
 
-<span style="color:blue">**Note: please read through all instructions and the code skeleton carefully if you get stuck, and ask questions in case something is unclear. Often the answer is written down already</span>**.
-
-
 ##Scope
 
-The practical runs in the same time loop (that can also be run step-by-step) as the previous practical. The objects are not limited to convex ones; every triangle mesh would do. The software converts the mesh into a set of spherical particles which are vertex based, and draws constraints between them to enforce rigidity, collisions, and auxiliary constraints. There are no ambient forces but gravity in the basic version. Note that the spherical particles only approximate the mesh; you might see collisions which are not exact triangle-to-triangle, and that is acceptable. Moreover, there might be some penetration on edges if the mesh is not dense enough.
+The practical runs in the same time loop (that can also be run step-by-step) as the previous practical. The objects are not limited to convex ones; every triangle mesh would do. The software automatically converts a surface OFF mesh into a tetrahedral mesh with [Tetgen](http://wias-berlin.de/software/index.jsp?id=TetGen&lang=1). There are no ambient forces but gravity in the basic version. However, a tetrahedral mesh can be provided by the scene files with the .MESH format.
 
-A considerable difference is that the platform is no longer a mesh in the usual sense (although it appears as such)---it is treated as a barrier constraint, where objects cannot fall beyond it. Particles are only assigned to loaded meshes.
+A considerable difference from the previous practical is that the platform is no longer a mesh in the usual sense (although it appears as such)---it is treated as a barrier constraint, where objects cannot fall beyond the supporting plane. As a consequence, they cannot also fall down the eternal pit of damnation, and will float on air on that plane, as if the platform is infinite. 
 
-The major difference from previous methods is that each particle is a dynamic entity on its own: it has a position (center) $x_i$, a velocity $v_i$, an inverse mass $\omega_i$, and a radius $r_i$. The mesh rigid (or otherwise) movement is implicity by enforcing rigidity constraints. That simplifies collision detection and resolution considerably, but as you will see, is also less accurate physically.
+The objects move in time steps by altering each vertex of the tet mesh, by solving the finite-element equation for movement as learnt in class (*Lecture 8*). For this, you will set up the mass, damping, and stiffness matrices in the beginning of time, and whenever the time step changes. Moreover, you will then set of the Cholesky solver the factorizes these matrices to be ready for solutions in each time step. 
 
-The practical is configured to handle four possible constraints:
+The user can draw distance constraints between vertices as they move. Those constraints would maintain the distance at the point of drawing, as if you put a rigid rod between them.
 
-1. **Barrier**: one coordinate of the object is bounded. For instance, the natural constraint for every particle on the platform of height $\frac{h}{2}$ is $C_B=y - \frac{h}{2} \geq 0$.
+Within each time step, you will also iteratively solve for velocity and position correction using the methods learned in class (*Lectures 7 and 9*) to resolve constraints.
+
+Note that every vertex has one velocity; this practical will not explicitly model rigid-body behavior with angular velocity.
+
+##The Time Loop
+
+The algorithm will perform the following within each time loop:
+
+1. Integrate velocities and positions from external and internal forces (the finite-element stage).
+
+2. Collect collision and other constraints if active.
+
+3. Resolve velocities and then positions to valid ones according to the constraints.
+
+##Finite-Element Integration
+
+Finite-element integration consists of two main steps that you will have to implement:
+
+###Matrix constrution
+
+At the beginning of time, or any change to the time step, you have to construct the basic matrices $M$, $K$ and $D$, and consequently the left-hand side matrix $A=M+\Delta t D+\Delta t^2 K$. Those all have to be sparse matrices (of the data type``Eigen::SparseMatrix<double``). You have to fill them is using COO triplet format with `Eigen::Triplet<double>` as learnt in class. Then, you can see the Cholesky decomposition code preparing the solver. This is all in functon `createGlobalMatrices()`.
+
+###Integration.
+
+At each time step, you have to creat the right-hand side from current positions and velocities, and solve the system to get the new velocities (and consequently positions). This is in the usual function `integrateVelocities()`. As this function only changes right-hand side, it is quite cheap in time.
+
+The scene file contains the necessary material parameters: Young's Modulus, Poisson's ratio, and mass density. You need to produce the proper masses and stiffness tensors from them. Damping parameters $\alpha$ and $\beta$ are given as inputs to the function, and hardcoded as $0.02$ in `main.cpp`.
+
+##Resolving constraints
+
+The constraints are resolved on a loop until all of them are satisfied. There are two similar loops: one that solves for impulses to correct velocities (*lecture 7*) and a subsequent one to fix positions (*lecture 9*). The loops run until a full streak of constraints make no change (zero impulses), or the max iterations limit has passed. In each iteration, a single constraint is satisfied. 
+
+
+The practical is currently configured to encode four possible constraints:
+
+1. **Barrier**: one coordinate of the object is bounded. The "natural" constrains are being always higher than the boundary: $C_B=y - h \geq 0$.
 <br />
-2. **Collision**: two spherical particles penetrate each other. The constraint is then the inequality $C_C = \left|\vec{x}_{ij}\right|-(r_i+r_j)\geq 0$, where $\vec{x}_{ij}=\vec{x}_i-\vec{x}_j$ is the vector between the two centers.
+2. **Collision**: two tetrahedra are penetrating in points $p_1$ and $p_2$, with contact normal $n$, similarly to the first practical. The constraint is then $C(p_1,p_2)=n^T\cdot (p_2-p_1)$
 <br />
-3. **Rigidity**: The particles of the mesh which share an edge $\vec{e}_{ij}$ also produce a constraint $C_e = \left|\vec{x}_{ij}\right|-\left|\vec{e}_{ij}\right|=0$, where $\left|\vec{e}_{ij}\right|$ is the original edge length. This constraint makes sure the distance is kept while moving throuh space, and does not cause deformation.
-<br />
-4. **Attachment**: a user-prescribed constraint couples the coordinates of one vertex of one mesh with another. That is, the constraint $C_A=\vec{x}_i-\vec{x}_j-\vec{a}_{ij}=0$, where $\vec{a}_{ij}$ is the original vector between them both. Note that this does not allow rotation (this is hanndled as an extension). If $\vec{a}_{ij}=0$ originally, then the objects keep attaching. Note that we do not do vector constraints. Each constraint is a single scalar function. Therefore, attachment constraints are actually encoded as 3 independent constraints: one per coordinate.
+3. **Distance**: Two vertices $v_1$ and $v_2$ have a prescribed distance $d_{12}$ so that the constraint is $C(v_1,v_2) = \left|v_1-v_2\right|-d_{12}=0$
 
 ###Constraints and gradients
 
-A single constraint is usually only expressed as the function of the coordinates of two particles (that means mostly up to  variables). You need to analytically compute the gradient of these functions, and apply them in the constraint code (below explained how). Example: the rigidity constraint: $C_e = \left|\vec{x}_{ij}\right|-\left|\vec{e}_{ij}\right|=0$, and we get:
+A single constraint is usually only expressed as the function of the coordinates of two vertices (so 6 variables). You need to analytically compute the gradient of these functions, and code them in the constraint code (below explained how). Example: the distance constraint: $C(v_1,v_2) = \left|v_1-v_2\right|-d_{12}=0$ has the gradient:
 
-$$\nabla C_e = \left( \frac{\vec{x}_{ij}}{\left| \vec{x}_{ij} \right|}, -\frac{\vec{x}_{ij}}{\left| \vec{x}_{ij} \right|} \right)$$
+$$\nabla C_e = \left( \frac{v_1-v_2}{\left| v_1-v_2 \right|}, -\frac{v_1-v_2}{\left| v_1-v_2 \right|} \right)$$
 
-Where the gradient expressed in the 6 varibles of the three coordinates to $\vec{x}_i$ and $\vec{x}_j$ each.
+Where the gradient expressed in the 6 varibles of the three coordinates to $v_1$ and $v_2$ each.
 
 The other constraints have mostly straightforward gradients. Note that the barrier constraint, for instance, only applies to a single coordinate in a vertex. This is made possible due to the indexing scheme we apply in this practicle.
 
+The code is arranged so that the constraint-resolution loop(s) are not aware of the type of constraint and how to resolve it; the entire code is within the `Constraint` class, and it gives back the necessary outputs.
 
-###Basic Requirements
+You will note that constraints can be either equality or inequality; while the resolution math is the same, inequality constraints would not receive impulses if they are already satisfied.
 
-The practical includes the following basic mandatory requirements:
-
-
-1. For every time step, integrate the accelerations and add the impulses of particles into velocities, and integrate the velocities into positions. Use an *semi-implicit scheme*, as learned in class(Lecture 5). Note that this just means to integrate velocity to $v(t+\Delta t)$ and subsequently position from the integrated velocity. The time step difference $\Delta t$ is given by the GUI, and controllable by the menu.
-<br />
-2. For every time step, construct the collision, rigidity, attachment, and barrier constraints, and resolve them by projecting the integrated positions one by one until the entire system is satisfied. 
-<br />
-3. For every time step, update the velocities to match the positions (the position-based step).
-<br />
-4. Apply impulses from collision to change the velocities abruptly. This is a hack, but it works reasonable: for every position change $\Delta x$ induced by correcting a constraint, create impulse to a velocity change of $CR \cdot \frac{\Delta x}{\Delta t}$. Remember that impulses are only aggregated at this stage, and integrated in step (1) of this algorithm.
-
-
-See below for details on where to do all that in the code.
+Each constraint will have an additional coefficient of restitution. That means that you need to multiply each impulse by $(1+CR)$ to get the proper boost. Note that this should only apply to inequality constraints (for instance collision or barrier).
 
 ###Extensions
 
 The above will earn you $70\%$ of the grade. To get a full $100$, you must choose 2 of these 5 extension options, and augment the practical. Some will require minor adaptations to the GUI or the function structure which are easy to do. Each extension will earn you $15\%$, and the exact grading will commensurate with the difficulty. Note that this means that all extensions are equal in grade; if you take on a hard extension, it's your own challenge to complete well.
 
-1. Enhance the attachment constraint to include full rigidity. **Level: very easy**.
- <br />
-2. Change the rigidity constraint to become an inequality, where a rigidity value controls the ratio of the edge length that can be extended\compressed. This will make objects more plastic and susceptible to deformation. **Level: intermediate**. 
- <br />
-3. Allow to apply random user-prescribed impulses to objects, or constant forces (like wind). This requires modest modifications to the GUI. **Level: easy-intermediate**. 
- <br />
-4. Implement rigid-body projection by finding the rigid transformation from the original, as learnt in class (Lecture 9) rather than stiffen all edges sequentially. This should be exemplified by a scene that clearly shows the speed-up. **Level: intermediate**.
- <br />
-5. Resolve interlocking, instead of naive particle constraints, as learnt in Lecture 9. You will probably want to read the following paper: [Unified Particle Physics for Real-Time Applications](http://mmacklin.com/uppfrta_preprint.pdf). It is anyhow a recommended read to understand the particle business. **Level: hard**
- <br />
+
+1. Create extension and compression constraints - like distance constraints but with lower and upper bounds to the possible distance between two vertices, instead of a rigid single distance. **Level: easy**.
+ </br>
+ 2. Allow to apply random user-prescribed impulses to objects, or constant forces (like wind). This requires modest modifications to the GUI. **Level: easy-intermediate**. 
+ </br>
+ 3. Introduce perfectly rigid bodies that integrate like the first practical, just in tetrahedral-mesh mode, so with a single velocity and angular velocity. However, their collisions will still be handled by the same collision detection and constraint loop as the soft bodies (just the integration should be different). **Level: easy-intermediate**.
+ </br>
+4. Implement the corotational elements method as learnt in class (*lecture 8*). That would require to use a more changin-matrix efficient method to solve, like conjugate gradients. This is available through Eigen. **Level: intermediate-hard**.
+</br>
+5. Improve the slow-ish collision detection by introduction some cheap heirarchical bounding-volume method (for instance, group several tets under difference boxes). **Level: intermediate-hard**.
+ </br>
 
 You may invent your own extension as substitute to **one** in the list above, but it needs approval on the Lecturer's behalf **beforehand**.
 
@@ -86,7 +108,7 @@ You may invent your own extension as substitute to **one** in the list above, bu
 
 The installation follows the exact path as the previous practical. It is repeated for completeness.
 
-The skeleton uses the following dependencies: [libigl](http://libigl.github.io/libigl/), and consequently [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page), for the representation and viewing of geometry, and [libccd](https://github.com/danfis/libccd) for collision detection. libigl viewer is using [nanogui](https://github.com/wjakob/nanogui) for the menu. Everything is bundled as either submodules, or just incorporated code within the environment, and you do not have to take care of any installation details. To get the library, use:
+The skeleton uses the following dependencies: [libigl](http://libigl.github.io/libigl/), and consequently [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page), for the representation and viewing of geometry, and [libccd](https://github.com/danfis/libccd) for collision detection. Again, everything is bundled as either submodules, or just incorporated code within the environment, and you do not have to take care of any installation details. To get the library, use:
 
 ```bash
 git clone --recursive https://github.com/avaxman/INFOMGP-Practical2.git
@@ -106,6 +128,7 @@ In windows, you need to use [cmake-gui](https://cmake.org/runningcmake/). Pressi
 ##Working with the repository
 
 All the code you need to update is in the ``practical2`` folder. Please do not attempt to commit any changes to the repository. <span style="color:red">You may ONLY fork the repository for your convenience and work on it if you can somehow make the forked repository PRIVATE afterwards</span>. Solutions to the practical which are published online in any public manner will **disqualify** the students! submission will be done in the "classical" department style of submission servers, published separately.
+
 
 ##The coding environment for the tasks
 
