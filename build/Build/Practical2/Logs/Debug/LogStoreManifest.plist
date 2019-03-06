@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>9</integer>
+	<key>logs</key>
+	<dict>
+		<key>0A6D53DE-79DE-481C-8D8C-D4DAEDFA61E5</key>
+		<dict>
+			<key>className</key>
+			<string>DBGConsoleLog</string>
+			<key>documentTypeString</key>
+			<string>com.apple.dt.IDE.DebuggerLogContentType</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.DebugLog</string>
+			<key>fileName</key>
+			<string>0A6D53DE-79DE-481C-8D8C-D4DAEDFA61E5.xcactivitylog</string>
+			<key>highLevelStatus</key>
+			<string>S</string>
+			<key>schemeIdentifier-containerName</key>
+			<string>Practical2 project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Practical2_bin</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Debug Practical2_bin</string>
+			<key>timeStartedRecording</key>
+			<real>573589217.67550802</real>
+			<key>timeStoppedRecording</key>
+			<real>573589250.43366206</real>
+			<key>title</key>
+			<string>Debug Practical2_bin</string>
+			<key>uniqueIdentifier</key>
+			<string>0A6D53DE-79DE-481C-8D8C-D4DAEDFA61E5</string>
+		</dict>
+		<key>2171143E-4204-4BAC-AFBC-7EA0645EDE82</key>
+		<dict>
+			<key>className</key>
+			<string>DBGConsoleLog</string>
+			<key>documentTypeString</key>
+			<string>com.apple.dt.IDE.DebuggerLogContentType</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.DebugLog</string>
+			<key>fileName</key>
+			<string>2171143E-4204-4BAC-AFBC-7EA0645EDE82.xcactivitylog</string>
+			<key>highLevelStatus</key>
+			<string>S</string>
+			<key>schemeIdentifier-containerName</key>
+			<string>Practical2 project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Practical2_bin</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Debug Practical2_bin</string>
+			<key>timeStartedRecording</key>
+			<real>573589165.59614301</real>
+			<key>timeStoppedRecording</key>
+			<real>573589180.779392</real>
+			<key>title</key>
+			<string>Debug Practical2_bin</string>
+			<key>uniqueIdentifier</key>
+			<string>2171143E-4204-4BAC-AFBC-7EA0645EDE82</string>
+		</dict>
+		<key>4D58A567-62A6-4374-9B15-0A1EB5EB466C</key>
+		<dict>
+			<key>className</key>
+			<string>DBGConsoleLog</string>
+			<key>documentTypeString</key>
+			<string>com.apple.dt.IDE.DebuggerLogContentType</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.DebugLog</string>
+			<key>fileName</key>
+			<string>4D58A567-62A6-4374-9B15-0A1EB5EB466C.xcactivitylog</string>
+			<key>highLevelStatus</key>
+			<string>S</string>
+			<key>schemeIdentifier-containerName</key>
+			<string>Practical2 project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Practical2_bin</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Debug Practical2_bin</string>
+			<key>timeStartedRecording</key>
+			<real>573589195.16166997</real>
+			<key>timeStoppedRecording</key>
+			<real>573589206.68815994</real>
+			<key>title</key>
+			<string>Debug Practical2_bin</string>
+			<key>uniqueIdentifier</key>
+			<string>4D58A567-62A6-4374-9B15-0A1EB5EB466C</string>
+		</dict>
+		<key>585EC07A-B73E-4AB8-BEA9-6F402C104192</key>
+		<dict>
+			<key>className</key>
+			<string>DBGConsoleLog</string>
+			<key>documentTypeString</key>
+			<string>com.apple.dt.IDE.DebuggerLogContentType</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.DebugLog</string>
+			<key>fileName</key>
+			<string>585EC07A-B73E-4AB8-BEA9-6F402C104192.xcactivitylog</string>
+			<key>highLevelStatus</key>
+			<string>S</string>
+			<key>schemeIdentifier-containerName</key>
+			<string>Practical2 project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Practical2_bin</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Debug Practical2_bin</string>
+			<key>timeStartedRecording</key>
+			<real>573588153.44616699</real>
+			<key>timeStoppedRecording</key>
+			<real>573588172.70205295</real>
+			<key>title</key>
+			<string>Debug Practical2_bin</string>
+			<key>uniqueIdentifier</key>
+			<string>585EC07A-B73E-4AB8-BEA9-6F402C104192</string>
+		</dict>
+		<key>9797FC00-A2EC-49BB-B233-97C7E88A77CA</key>
+		<dict>
+			<key>className</key>
+			<string>DBGConsoleLog</string>
+			<key>documentTypeString</key>
+			<string>com.apple.dt.IDE.DebuggerLogContentType</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.DebugLog</string>
+			<key>fileName</key>
+			<string>9797FC00-A2EC-49BB-B233-97C7E88A77CA.xcactivitylog</string>
+			<key>highLevelStatus</key>
+			<string>S</string>
+			<key>schemeIdentifier-containerName</key>
+			<string>Practical2 project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Practical2_bin</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Debug Practical2_bin</string>
+			<key>timeStartedRecording</key>
+			<real>573589250.66447604</real>
+			<key>timeStoppedRecording</key>
+			<real>573589254.00873494</real>
+			<key>title</key>
+			<string>Debug Practical2_bin</string>
+			<key>uniqueIdentifier</key>
+			<string>9797FC00-A2EC-49BB-B233-97C7E88A77CA</string>
+		</dict>
+		<key>9F4BAEA1-A330-4CC3-B11F-8392D894B4A0</key>
+		<dict>
+			<key>className</key>
+			<string>DBGConsoleLog</string>
+			<key>documentTypeString</key>
+			<string>com.apple.dt.IDE.DebuggerLogContentType</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.DebugLog</string>
+			<key>fileName</key>
+			<string>9F4BAEA1-A330-4CC3-B11F-8392D894B4A0.xcactivitylog</string>
+			<key>highLevelStatus</key>
+			<string>S</string>
+			<key>schemeIdentifier-containerName</key>
+			<string>Practical2 project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Practical2_bin</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Debug Practical2_bin</string>
+			<key>timeStartedRecording</key>
+			<real>573588105.06315506</real>
+			<key>timeStoppedRecording</key>
+			<real>573588111.95471203</real>
+			<key>title</key>
+			<string>Debug Practical2_bin</string>
+			<key>uniqueIdentifier</key>
+			<string>9F4BAEA1-A330-4CC3-B11F-8392D894B4A0</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

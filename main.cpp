@@ -1,52 +1,50 @@
 #include <igl/opengl/glfw/Viewer.h>
 #include <igl/opengl/glfw/imgui/ImGuiMenu.h>
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
-#include <igl/unproject_onto_mesh.h>
-#include <igl/unproject.h>
 #include <imgui/imgui.h>
 #include <iostream>
 #include "scene.h"
-#include <igl/copyleft/tetgen/tetrahedralize.h>
+#include "line_cylinders.h"
 
-using namespace Eigen;
-using namespace std;
 
-MatrixXd V;
-MatrixXi F;
-MatrixXd P1, P2;   //for marking constraints
+Eigen::MatrixXd V;
+Eigen::MatrixXi F;
 igl::opengl::glfw::Viewer mgpViewer;
-int distConstV1, distConstV2;
-Eigen::MatrixXi EConst;    //the user distance constraints in (V1,V2) format each row
-
-MatrixXd platTriV;
-MatrixXi platTriF;
 
 float currTime = 0;
+
+//initial values
 float timeStep = 0.02;
 float CRCoeff= 1.0;
-double tolerance=10e-6;
-int maxIterations=100;
-bool vertexChosen=false;
-int currVertex=-1;
+
+
+double tolerance = 10e-3;
+int maxIterations=10000;
 
 Scene scene;
 
+Eigen::MatrixXd platV;
+Eigen::MatrixXi platF;
+Eigen::MatrixXi platT;
+Eigen::RowVector3d platCOM;
+Eigen::RowVector4d platOrientation;
 
-
-void createPlatform(MatrixXd& platV, MatrixXi& platF, RowVector3d& platCOM, RowVector4d& platOrientation)
+void createPlatform()
 {
   double platWidth=100.0;
-  platCOM<<0.0,0.0,-0.0;
-  platV.resize(8,3);
+  platCOM<<0.0,-5.0,-0.0;
+  platV.resize(9,3);
   platF.resize(12,3);
+  platT.resize(12,4);
   platV<<-platWidth,0.0,-platWidth,
   -platWidth,0.0,platWidth,
   platWidth,0.0,platWidth,
   platWidth,0.0, -platWidth,
-  -platWidth,-platWidth/2.0,-platWidth,
-  -platWidth,-platWidth/2.0,platWidth,
-  platWidth,-platWidth/2.0,platWidth,
-  platWidth,-platWidth/2.0, -platWidth;
+  -platWidth,-platWidth/10.0,-platWidth,
+  -platWidth,-platWidth/10.0,platWidth,
+  platWidth,-platWidth/10.0,platWidth,
+  platWidth,-platWidth/10.0, -platWidth,
+  0.0,-platWidth/20.0, 0.0;
   platF<<0,1,2,
   2,3,0,
   6,5,4,
@@ -61,27 +59,50 @@ void createPlatform(MatrixXd& platV, MatrixXi& platF, RowVector3d& platCOM, RowV
   3,7,4;
   
   platOrientation<<1.0,0.0,0.0,0.0;
+  
+  platT<<platF, VectorXi::Constant(12,8);
+  
+  
 }
 
-
-void update_mesh(igl::opengl::glfw::Viewer &viewer)
+void updateMeshes(igl::opengl::glfw::Viewer &viewer)
 {
-  viewer.data().clear();
-  MatrixXi fullF(platTriF.rows()+F.rows(),3);
-  fullF<<platTriF, F.array()+platTriV.rows();
-  MatrixXd fullV(platTriV.rows()+V.rows(),3);
-  fullV<<platTriV, V;
-  viewer.data().set_mesh(fullV,fullF);
- 
-  Eigen::MatrixXd constV1(EConst.rows(),3), constV2(EConst.rows(),3);
-  for (int i=0;i<EConst.rows();i++){
-    constV1.row(i)=V.row(EConst(i,0));
-    constV2.row(i)=V.row(EConst(i,1));
+  RowVector3d platColor; platColor<<0.8,0.8,0.8;
+  RowVector3d meshColor; meshColor<<0.8,0.2,0.2;
+  viewer.core.align_camera_center(scene.meshes[0].currV);
+  for (int i=0;i<scene.meshes.size();i++){
+    viewer.data_list[i].clear();
+    viewer.data_list[i].set_mesh(scene.meshes[i].currV, scene.meshes[i].F);
+    viewer.data_list[i].set_face_based(true);
+    viewer.data_list[i].set_colors(meshColor);
+    viewer.data_list[i].show_lines=false;
+  }
+  viewer.data_list[0].show_lines=false;
+  viewer.data_list[0].set_colors(platColor.replicate(scene.meshes[0].F.rows(),1));
+  viewer.data_list[0].set_face_based(true);
+  //viewer.core.align_camera_center(scene.meshes[0].currV);
+  
+  //updating constraint viewing
+  MatrixXi constF;
+  MatrixXd constV, constC;
+  
+  MatrixXd P1(scene.constraints.size(),3);
+  MatrixXd P2(scene.constraints.size(),3);
+  for (int i=0;i<scene.constraints.size();i++){
+    P1.row(i)=scene.meshes[scene.constraints[i].m1].currV.row(scene.constraints[i].v1);
+    P2.row(i)=scene.meshes[scene.constraints[i].m2].currV.row(scene.constraints[i].v2);
   }
   
-  RowVector3d constColor; constColor<<0.2,1.0,0.1;
-  viewer.data().set_face_based(true);
-  viewer.data().add_edges(constV1, constV2, constColor);
+  MatrixXd cyndColors=RowVector3d(1.0,1.0,0.0).replicate(P1.size(),1);
+  
+  double radius = 0.5;
+  hedra::line_cylinders(P1,P2,radius,cyndColors,8,constV,constF,constC);
+  viewer.data_list[scene.meshes.size()].set_mesh(constV, constF);
+  viewer.data_list[scene.meshes.size()].set_face_based(true);
+  viewer.data_list[scene.meshes.size()].set_colors(constC);
+  viewer.data_list[scene.meshes.size()].show_lines=false;
+  
+  
 }
 
 bool key_down(igl::opengl::glfw::Viewer &viewer, unsigned char key, int modifier)
@@ -89,15 +110,19 @@ bool key_down(igl::opengl::glfw::Viewer &viewer, unsigned char key, int modifier
   if (key == ' ')
   {
     viewer.core.is_animating = !viewer.core.is_animating;
+    if (viewer.core.is_animating)
+      cout<<"Simulation running"<<endl;
+    else
+      cout<<"Simulation paused"<<endl;
     return true;
   }
   
   if (key == 'S')
   {
     if (!viewer.core.is_animating){
-      scene.updateScene(timeStep, CRCoeff, tolerance, maxIterations,V);
+      scene.updateScene(timeStep, CRCoeff, tolerance, maxIterations);
       currTime+=timeStep;
-      update_mesh(viewer);
+      updateMeshes(viewer);
       std::cout <<"currTime: "<<currTime<<std::endl;
       return true;
     }
@@ -106,17 +131,20 @@ bool key_down(igl::opengl::glfw::Viewer &viewer, unsigned char key, int modifier
 }
 
 
+
+
 bool pre_draw(igl::opengl::glfw::Viewer &viewer)
 {
   using namespace Eigen;
   using namespace std;
   
   if (viewer.core.is_animating){
-    scene.updateScene(timeStep, CRCoeff, tolerance, maxIterations, V);
-    update_mesh(viewer);
+    scene.updateScene(timeStep, CRCoeff, tolerance, maxIterations);
     currTime+=timeStep;
     //cout <<"currTime: "<<currTime<<endl;
+    updateMeshes(viewer);
   }
+ 
   
   return false;
 }
@@ -137,76 +165,11 @@ class CustomMenu : public igl::opengl::glfw::imgui::ImGuiMenu
       
       if (ImGui::InputFloat("Time Step", &timeStep)) {
         mgpViewer.core.animation_max_fps = (((int)1.0/timeStep));
-        scene.initScene(timeStep, 0.02, 0.02, V);
       }
     }
   }
 };
 
-bool mouse_up(igl::opengl::glfw::Viewer& viewer, int button, int modifiers)
-{
-  if (!vertexChosen)
-    return false;
-  double x = viewer.current_mouse_x;
-  double y = viewer.core.viewport(3) - viewer.current_mouse_y;
-  Vector3f newPos=igl::unproject(Vector3f(x, y, viewer.down_mouse_z), (viewer.core.view * viewer.core.model).eval(), viewer.core.proj, viewer.core.viewport);
-  
-  if ((igl::opengl::glfw::Viewer::MouseButton)button==igl::opengl::glfw::Viewer::MouseButton::Left){
-    //scene.createUserImpulse(currVertex, newPos);
-    update_mesh(viewer);
-    vertexChosen=false;
-    return true;
-  }
-  
-  if ((igl::opengl::glfw::Viewer::MouseButton)button==igl::opengl::glfw::Viewer::MouseButton::Right){
-    //creating new constraint
-    int fid;
-    Eigen::Vector3f bc;
-    if(igl::unproject_onto_mesh(Eigen::Vector2f(x,y), viewer.core.view * viewer.core.model,
-                                viewer.core.proj, viewer.core.viewport, V, F, fid, bc));
-    
-    Eigen::MatrixXf::Index maxCol;
-    bc.maxCoeff(&maxCol);
-    int otherVertex=F(fid, maxCol);
-    scene.addUserConstraint(currVertex, otherVertex, EConst);
-    update_mesh(viewer);
-    vertexChosen=false;
-    return true;
-  }
-  
-  return false;
-}
-
-
-
-bool mouse_down(igl::opengl::glfw::Viewer& viewer, int button, int modifiers)
-{
-  int fid;
-  Eigen::Vector3f bc;
-  // Cast a ray in the view direction starting from the mouse position
-  double x = viewer.current_mouse_x;
-  double y = viewer.core.viewport(3) - viewer.current_mouse_y;
-  
-  if(igl::unproject_onto_mesh(Eigen::Vector2f(x,y), viewer.core.view * viewer.core.model,
-                              viewer.core.proj, viewer.core.viewport, V, F, fid, bc))
-  {
-    //giving impulse to the chosen vertex
-    Eigen::MatrixXf::Index maxCol;
-    bc.maxCoeff(&maxCol);
-    currVertex=F(fid, maxCol);
-    vertexChosen=true;
-    mgpViewer.core.is_animating = false;
-    if ((igl::opengl::glfw::Viewer::MouseButton)button==igl::opengl::glfw::Viewer::MouseButton::Left){
-      //TODO: give impulses
-    }
-    
-    if ((igl::opengl::glfw::Viewer::MouseButton)button==igl::opengl::glfw::Viewer::MouseButton::Right){
-      
-    }
-    return true;
-  }
-  return false;
-};
 
 
 int main(int argc, char *argv[])
@@ -216,47 +179,41 @@ int main(int argc, char *argv[])
   
   
   // Load scene
-  if (argc<3){
-    cout<<"Run program as follows: infomgp_practical2 <folder_name> <scene_file> <constraint_file>"<<endl;
+  if (argc<4){
+    cout<<"Please provide path (argument 1), name of scene file (argument 2), and name of constraints file (argument 3)!"<<endl;
     return 0;
   }
-  cout<<"data folder: "<<std::string(argv[1])<<endl;
   cout<<"scene file: "<<std::string(argv[2])<<endl;
-  cout<<"constraints file: "<<std::string(argv[3])<<endl;
- 
-  
   //create platform
+  createPlatform();
+  scene.addMesh(platV, platF, platT, 10000.0, true, platCOM, platOrientation);
+  
+  //load scene from file
+  scene.loadScene(std::string(argv[1]),std::string(argv[2]),std::string(argv[3]));
 
-  RowVector3d platCOM;
-  RowVector4d platOrientation;
-  createPlatform(platTriV, platTriF, platCOM, platOrientation);
-  //igl::copyleft::tetgen::tetrahedralize(platTriV,platTriF,"pq1.2", platV,platT,platF);
-  //scene.addMesh(platV, platT, 0, 0, 100000.0, true, platCOM, platOrientation);
-  
-  scene.loadScene(std::string(argv[1]),std::string(argv[2]),std::string(argv[3]), F, EConst);
-  scene.initScene(timeStep, 0.02, 0.02, V);
-  scene.setPlatformBarriers(platTriV, CRCoeff);
-  
-  //cout<<"F: "<<F<<endl;
-  //cout<<"platV: "<<platV<<endl;
+  scene.updateScene(0.0, CRCoeff, tolerance, maxIterations);
   
   // Viewer Settings
+  for (int i=0;i<scene.meshes.size();i++){
+    if (i!=0)
+      mgpViewer.append_mesh();
+    //mgpViewer.data_list[i].set_mesh(scene.meshes[i].currV, scene.meshes[i].F);
+  }
+  //mgpViewer.core.align_camera_center(scene.meshes[0].currV);
   
+  //constraints mesh (for lines)
+  mgpViewer.append_mesh();
   mgpViewer.callback_pre_draw = &pre_draw;
   mgpViewer.callback_key_down = &key_down;
-  mgpViewer.callback_mouse_up = &mouse_up;
-  mgpViewer.callback_mouse_down = &mouse_down;
   mgpViewer.core.is_animating = false;
   mgpViewer.core.animation_max_fps = 50.;
-  
+  updateMeshes(mgpViewer);
   CustomMenu menu;
   mgpViewer.plugins.push_back(&menu);
   
-  update_mesh(mgpViewer);
+  cout<<"Press [space] to toggle continuous simulation" << endl;
+  cout<<"Press 'S' to advance time step-by-step"<<endl;
   
-  cout<<"Press [space] to toggle continuous simulation." << endl;
-  cout<<"Press 'S' to advance time step-by-step."<<endl;
-  cout<<"Left mouse button - Pick, drag, and drop vertices by mouse to give them impulses in direction of the drag."<<endl;
-  cout<<"Right mouse button - Pick, drag, and pick another vertex to create an attachment constraint between them."<<endl;
   mgpViewer.launch();
+ 
 }

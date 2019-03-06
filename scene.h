@@ -2,382 +2,253 @@
 #define SCENE_HEADER_FILE
 
 #include <vector>
-#include <queue>
 #include <fstream>
 #include <igl/bounding_box.h>
-#include <igl/readOFF.h>
-#include <igl/per_vertex_normals.h>
-#include <igl/edge_topology.h>
-#include <igl/diag.h>
 #include <igl/readMESH.h>
-#include <igl/copyleft/tetgen/tetrahedralize.h>
-#include "constraints.h"
-#include "auxfunctions.h"
 #include "ccd.h"
+#include "volInt.h"
+#include "auxfunctions.h"
+#include "constraints.h"
 
 using namespace Eigen;
 using namespace std;
+
 
 void support(const void *_obj, const ccd_vec3_t *_d, ccd_vec3_t *_p);
 void stub_dir(const void *obj1, const void *obj2, ccd_vec3_t *dir);
 void center(const void *_obj, ccd_vec3_t *dir);
 
+
+
+//Impulse is defined as a pair <position, direction>
+typedef std::pair<RowVector3d,RowVector3d> Impulse;
+
+
 //the class the contains each individual rigid objects and their functionality
 class Mesh{
 public:
+  MatrixXd origV;   //original vertex positions, where COM=(0.0,0.0,0.0) - never change this!
+  MatrixXd currV;   //current vertex position
+  MatrixXi F;   //faces of the tet mesh
+  MatrixXi T;   //Tets in the tet mesh
   
-  //position
-  VectorXd origPositions;     //3|V|x1 original vertex positions in xyzxyz format - never change this!
-  VectorXd currPositions;     //3|V|x1 current vertex positions in xyzxyz format
+  VectorXi boundTets;  //indices (from T) of just the boundary tets, for collision
+  
+  //position of object in space. We must always have that currV = QRot(origV, orientation)+ COM
+  RowVector4d orientation; //current orientation
+  RowVector3d COM;  //current center of mass
+  Matrix3d invIT;  //Original *inverse* inertia tensor around the COM, defined in the rest state to the object (so to the canonical world system)
+  
+  VectorXd tetVolumes;    //|T|x1 tetrahedra volumes
+  VectorXd invMasses;     //|T|x1 tetrahedra *inverse* masses
   
   //kinematics
-  bool isFixed;               //is the object immobile (infinite mass)
-  VectorXd currImpulses;      //3|V|x1 correction impulses per coordinate
-  VectorXd currVelocities;    //3|V|x1 velocities per coordinate in xyzxyz format.
+  bool isFixed;  //is the object immobile
+  double totalMass;  //sum(1/invMass)
+  double totalVolume;
+  RowVector3d comVelocity;  //the linear velocity of the center of mass
+  RowVector3d angVelocity;  //the angular velocity of the object.
+
+  //checking collision between bounding boxes, and consequently the boundary tets if succeeds.
+  //you do not need to update these functions (isBoxCollide and isCollide) unless you are doing a different collision
   
-  MatrixXi T;                 //|T|x4 tetrahdra
-  VectorXd invMasses;         //|V|x1 inverse masses of vertices, computed in the beginning as 1.0/(density * vertex voronoi area)
-  VectorXd voronoiVolumes;    //|V|x1 the voronoi volume of vertices
-  VectorXd tetVolumes;        //|T|x1 tetrahedra volumes
-  int globalOffset;           //the global index offset of the of opositions/velocities/impulses from the beginning of the global coordinates array in the containing scene class
-  
-  VectorXi boundTets;  //just the boundary tets, for collision
-  
-  double youngModulus, poissonRatio, density, alpha, beta;
-  
-  SparseMatrix<double> A, K, M, D;   //The soft-body matrices
-  
-  SimplicialLLT<SparseMatrix<double>>* ASolver;   //the solver for the left-hand side matrix constructed for FEM
-  
-  ~Mesh(){if (ASolver!=NULL) delete ASolver;}
-  
-  //Quick-reject checking collision between mesh bounding boxes.
-  bool isBoxCollide(const Mesh& m2){
-    RowVector3d XMin1=RowVector3d::Constant(3276700.0);
-    RowVector3d XMax1=RowVector3d::Constant(-3276700.0);
-    RowVector3d XMin2=RowVector3d::Constant(3276700.0);
-    RowVector3d XMax2=RowVector3d::Constant(-3276700.0);
-    for (int i=0;i<origPositions.size();i+=3){
-      XMin1=XMin1.array().min(currPositions.segment(i,3).array().transpose());
-      XMax1=XMax1.array().max(currPositions.segment(i,3).array().transpose());
-    }
-    for (int i=0;i<m2.origPositions.size();i+=3){
-      XMin2=XMin2.array().min(m2.currPositions.segment(i,3).array().transpose());
-      XMax2=XMax2.array().max(m2.currPositions.segment(i,3).array().transpose());
-    }
-    
-    /*double rmax1=vertexSphereRadii.maxCoeff();
-     double rmax2=m2.vertexSphereRadii.maxCoeff();
-     XMin1.array()-=rmax1;
-     XMax1.array()+=rmax1;
-     XMin2.array()-=rmax2;
-     XMax2.array()+=rmax2;*/
+  bool isBoxCollide(const Mesh& m){
+    RowVector3d VMin1=currV.colwise().minCoeff();
+    RowVector3d VMax1=currV.colwise().maxCoeff();
+    RowVector3d VMin2=m.currV.colwise().minCoeff();
+    RowVector3d VMax2=m.currV.colwise().maxCoeff();
     
     //checking all axes for non-intersection of the dimensional interval
     for (int i=0;i<3;i++)
-      if ((XMax1(i)<XMin2(i))||(XMax2(i)<XMin1(i)))
+      if ((VMax1(i)<VMin2(i))||(VMax2(i)<VMin1(i)))
         return false;
     
-    return true;  //all dimensional intervals are overlapping = possible intersection
+    return true;  //all dimensional intervals are overlapping = intersection
+    
   }
   
-  bool isNeighborTets(const RowVector4i& tet1, const RowVector4i& tet2){
-    for (int i=0;i<4;i++)
-      for (int j=0;j<4;j++)
-        if (tet1(i)==tet2(j)) //shared vertex
-          return true;
+  bool isCollide(const Mesh& m, double& depth, RowVector3d& intNormal, RowVector3d& intPosition){
     
-    return false;
-  }
-  
-  
-  //this function creates all collision constraints between vertices of the two meshes
-  void createCollisionConstraints(const Mesh& m, const bool sameMesh, const double timeStep, const double CRCoeff, vector<Constraint>& activeConstraints){
     
+    if ((isFixed && m.isFixed))  //collision does nothing
+      return false;
     
     //collision between bounding boxes
     if (!isBoxCollide(m))
-      return;
+      return false;
     
-    if ((isFixed && m.isFixed))  //collision does nothing
-      return;
+    //otherwise, full test
+    ccd_t ccd;
+    CCD_INIT(&ccd);
+    ccd.support1       = support; // support function for first object
+    ccd.support2       = support; // support function for second object
+    ccd.center1         =center;
+    ccd.center2         =center;
     
-    //creating tet spheres
-    /*MatrixXd c1(T.rows(), 3);
-     MatrixXd c2(m.T.rows(), 3);
-     VectorXd r1(T.rows());
-     VectorXd r2(m.T.rows());*/
+    ccd.first_dir       = stub_dir;
+    ccd.max_iterations = 100;     // maximal number of iterations
     
-    MatrixXd maxs1(boundTets.rows(),3);
-    MatrixXd mins1(boundTets.rows(),3);
-    MatrixXd maxs2(m.boundTets.rows(),3);
-    MatrixXd mins2(m.boundTets.rows(),3);
     
-    for (int i = 0; i < boundTets.size(); i++) {
-      MatrixXd tet1(4, 3); tet1 << currPositions.segment(3 * T(boundTets(i), 0), 3).transpose(),
-      currPositions.segment(3 * T(boundTets(i), 1), 3).transpose(),
-      currPositions.segment(3 * T(boundTets(i), 2), 3).transpose(),
-      currPositions.segment(3 * T(boundTets(i), 3), 3).transpose();
-      
-      //c1.row(i) = tet1.colwise().mean();
-      //r1(i) = ((c1.row(i).replicate(4, 1) - tet1).rowwise().norm()).maxCoeff();
-      mins1.row(i)=tet1.colwise().minCoeff();
-      maxs1.row(i)=tet1.colwise().maxCoeff();
-      
+    void* obj1=(void*)this;
+    void* obj2=(void*)&m;
+    
+    ccd_real_t _depth;
+    ccd_vec3_t dir, pos;
+    
+    int nonintersect = ccdMPRPenetration(obj1, obj2, &ccd, &_depth, &dir, &pos);
+    
+    if (nonintersect)
+      return false;
+    
+    for (int k=0;k<3;k++){
+      intNormal(k)=dir.v[k];
+      intPosition(k)=pos.v[k];
     }
     
-    for (int i = 0; i < m.boundTets.size(); i++) {
-      
-      MatrixXd tet2(4, 3); tet2 << m.currPositions.segment(3 * m.T(m.boundTets(i), 0), 3).transpose(),
-      m.currPositions.segment(3 * m.T(m.boundTets(i), 1), 3).transpose(),
-      m.currPositions.segment(3 * m.T(m.boundTets(i), 2), 3).transpose(),
-      m.currPositions.segment(3 * m.T(m.boundTets(i), 3), 3).transpose();
-      
-      //c2.row(i) = tet2.colwise().mean();
-      //r2(i) = ((c2.row(i).replicate(4, 1) - tet2).rowwise().norm()).maxCoeff();
-      mins2.row(i)=tet2.colwise().minCoeff();
-      maxs2.row(i)=tet2.colwise().maxCoeff();
-      
-    }
+    depth =_depth;
+    intPosition-=depth*intNormal/2.0;
     
-    //checking collision between every tetrahedrons
-    std::list<Constraint> collisionConstraints;
-    for (int i=0;i<boundTets.size();i++){
-      for (int j=0;j<m.boundTets.size();j++){
-        
-        //not checking for collisions between tetrahedra neighboring to the same vertices
-        if (sameMesh)
-          if (isNeighborTets(T.row(boundTets(i)), m.T.row(m.boundTets(j))))
-            continue;  //not creating collisions between neighboring tets
-        
-        bool overlap=true;
-        for (int k=0;k<3;k++)
-          if ((maxs1(i,k)<mins2(j,k))||(maxs2(j,k)<mins1(i,k)))
-            overlap=false;
-        
-        if (!overlap)
-          continue;
-        
-        VectorXi globalCollisionIndices(24);
-        VectorXd globalInvMasses(24);
-        for (int t=0;t<4;t++){
-          globalCollisionIndices.segment(3*t,3)<<globalOffset+3*(T(boundTets(i),t)), globalOffset+3*(T(boundTets(i),t))+1, globalOffset+3*(T(boundTets(i),t))+2;
-          globalInvMasses.segment(3*t,3)<<invMasses(T(boundTets(i),t)), invMasses(T(boundTets(i),t)),invMasses(T(boundTets(i),t));
-          globalCollisionIndices.segment(12+3*t,3)<<m.globalOffset+3*m.T(m.boundTets(j),t), m.globalOffset+3*m.T(m.boundTets(j),t)+1, m.globalOffset+3*m.T(m.boundTets(j),t)+2;
-          globalInvMasses.segment(12+3*t,3)<<m.invMasses(m.T(m.boundTets(j),t)), m.invMasses(m.T(m.boundTets(j),t)),m.invMasses(m.T(m.boundTets(j),t));
-        }
-        
-        ccd_t ccd;
-        CCD_INIT(&ccd);
-        ccd.support1       = support; // support function for first object
-        ccd.support2       = support; // support function for second object
-        ccd.center1         =center;
-        ccd.center2         =center;
-        
-        ccd.first_dir       = stub_dir;
-        ccd.max_iterations = 100;     // maximal number of iterations
-        
-        MatrixXd tet1(4, 3); tet1 << currPositions.segment(3 * T(boundTets(i), 0), 3).transpose(),
-        currPositions.segment(3 * T(boundTets(i), 1), 3).transpose(),
-        currPositions.segment(3 * T(boundTets(i), 2), 3).transpose(),
-        currPositions.segment(3 * T(boundTets(i), 3), 3).transpose();
-        
-        MatrixXd tet2(4, 3); tet2 << m.currPositions.segment(3 * m.T(m.boundTets(j), 0), 3).transpose(),
-        m.currPositions.segment(3 * m.T(m.boundTets(j), 1), 3).transpose(),
-        m.currPositions.segment(3 * m.T(m.boundTets(j), 2), 3).transpose(),
-        m.currPositions.segment(3 * m.T(m.boundTets(j), 3), 3).transpose();
-        
-        void* obj1=(void*)&tet1;
-        void* obj2=(void*)&tet2;
-        
-        ccd_real_t _depth;
-        ccd_vec3_t dir, pos;
-        
-        int nonintersect = ccdMPRPenetration(obj1, obj2, &ccd, &_depth, &dir, &pos);
-        
-        if (nonintersect)
-          continue;
-        
-        Vector3d intNormal, intPosition;
-        double depth;
-        for (int k=0;k<3;k++){
-          intNormal(k)=dir.v[k];
-          intPosition(k)=pos.v[k];
-        }
-        
-        depth =_depth;
-        intPosition-=depth*intNormal/2.0;
-        
-        Vector3d p1=intPosition+depth*intNormal;
-        Vector3d p2=intPosition;
-        
-        //getting barycentric coordinates of each point
-        
-        MatrixXd PMat1(4,4); PMat1<<1.0,currPositions.segment(3*T(boundTets(i),0),3).transpose(),
-        1.0,currPositions.segment(3*T(boundTets(i),1),3).transpose(),
-        1.0,currPositions.segment(3*T(boundTets(i),2),3).transpose(),
-        1.0,currPositions.segment(3*T(boundTets(i),3),3).transpose();
-        PMat1.transposeInPlace();
-        
-        Vector4d rhs1; rhs1<<1.0,p1;
-        
-        Vector4d B1=PMat1.inverse()*rhs1;
-        
-        MatrixXd PMat2(4,4); PMat2<<1.0,m.currPositions.segment(3*m.T(m.boundTets(j),0),3).transpose(),
-        1.0,m.currPositions.segment(3*m.T(m.boundTets(j),1),3).transpose(),
-        1.0,m.currPositions.segment(3*m.T(m.boundTets(j),2),3).transpose(),
-        1.0,m.currPositions.segment(3*m.T(m.boundTets(j),3),3).transpose();
-        PMat2.transposeInPlace();
-        
-        Vector4d rhs2; rhs2<<1.0,p2;
-        
-        Vector4d B2=PMat2.inverse()*rhs2;
-        
-        //cout<<"B1: "<<B1<<endl;
-        //cout<<"B2: "<<B2<<endl;
-        
-        //Matrix that encodes the vector between interpenetration points by the c
-        MatrixXd v2cMat1(3,12); v2cMat1.setZero();
-        for (int k=0;k<3;k++){
-          v2cMat1(k,k)=B1(0);
-          v2cMat1(k,3+k)=B1(1);
-          v2cMat1(k,6+k)=B1(2);
-          v2cMat1(k,9+k)=B1(3);
-        }
-        
-        MatrixXd v2cMat2(3,12); v2cMat2.setZero();
-        for (int k=0;k<3;k++){
-          v2cMat2(k,k)=B2(0);
-          v2cMat2(k,3+k)=B2(1);
-          v2cMat2(k,6+k)=B2(2);
-          v2cMat2(k,9+k)=B2(3);
-        }
-        
-        MatrixXd v2dMat(3,24); v2dMat<<-v2cMat1, v2cMat2;
-        VectorXd constVector=intNormal.transpose()*v2dMat;
-        
-        //cout<<"intNormal: "<<intNormal<<endl;
-        //cout<<"n*(p2-p1): "<<intNormal.dot(p2-p1)<<endl;
-        collisionConstraints.push_back(Constraint(COLLISION, INEQUALITY,  globalCollisionIndices, globalInvMasses, constVector, 0, CRCoeff));
-        
-        //i=10000000;
-        //break;
-        
-      }
-    }
+    //Vector3d p1=intPosition+depth*intNormal;
+    //Vector3d p2=intPosition;
+    //std::cout<<"intPosition: "<<intPosition<<std::endl;
     
-    activeConstraints.insert(activeConstraints.end(), collisionConstraints.begin(), collisionConstraints.end());
+    //std::cout<<"depth: "<<depth<<std::endl;
+    //std::cout<<"After ccdGJKIntersect"<<std::endl;
+    
+    //return !nonintersect;
+    
+    return true;
+    
   }
   
   
-  
-  //where the matrices A,M,K,D are created and factorized to ASolver at each change of time step, or beginning of time.
-  void createGlobalMatrices(const double timeStep, const double _alpha, const double _beta)
-  {
-    
-    /***************************
-     TODO
-     ***************************/
-    
-    if (ASolver==NULL)
-      ASolver=new SimplicialLLT<SparseMatrix<double>>();
-    
-    /***************************
-     TODO
-     ***************************/
-    
+  //return the current inverted inertia tensor around the current COM. Update it by applying the orientation
+  Matrix3d getCurrInvInertiaTensor(){
+   /********
+    TODO: complete from Practical 1
+    *******/
   }
   
-  //computes tet volumes, masses, and allocate voronoi areas and inverse masses to
-  Vector3d initializeVolumesAndMasses()
-  {
-    tetVolumes.conservativeResize(T.rows());
-    voronoiVolumes.conservativeResize(origPositions.size()/3);
-    voronoiVolumes.setZero();
-    invMasses.conservativeResize(origPositions.size()/3);
-    Vector3d COM; COM.setZero();
-    for (int i=0;i<T.rows();i++){
-      Vector3d e01=origPositions.segment(3*T(i,1),3)-origPositions.segment(3*T(i,0),3);
-      Vector3d e02=origPositions.segment(3*T(i,2),3)-origPositions.segment(3*T(i,0),3);
-      Vector3d e03=origPositions.segment(3*T(i,3),3)-origPositions.segment(3*T(i,0),3);
-      Vector3d tetCentroid=(origPositions.segment(3*T(i,0),3)+origPositions.segment(3*T(i,1),3)+origPositions.segment(3*T(i,2),3)+origPositions.segment(3*T(i,3),3))/4.0;
-      tetVolumes(i)=std::abs(e01.dot(e02.cross(e03)))/6.0;
-      for (int j=0;j<4;j++)
-        voronoiVolumes(T(i,j))+=tetVolumes(i)/4.0;
-      
-      COM+=tetVolumes(i)*tetCentroid;
-    }
-    
-    COM.array()/=tetVolumes.sum();
-    for (int i=0;i<origPositions.size()/3;i++)
-      invMasses(i)=1.0/(voronoiVolumes(i)*density);
-    
-    return COM;
-    
-  }
   
-  //performing the integration step of the soft body.
-  void integrateVelocity(double timeStep){
-    
-    if (isFixed)
-      return;
-    
-    /***************************
-     TODO
-     ***************************/
-  }
-  
-  //Update the current position with the integrated velocity
-  void integratePosition(double timeStep){
+  //Update the current position and orientation by integrating the linear and angular velocities, and update currV accordingly
+  //You need to modify this according to its purpose
+  void updatePosition(double timeStep){
+    //just forward Euler now
     if (isFixed)
       return;  //a fixed object is immobile
     
-    currPositions+=currVelocities*timeStep;
-    //cout<<"currPositions: "<<currPositions<<endl;
+    /********
+     TODO: complete from Practical 1
+     *******/
+    
+    for (int i=0;i<currV.rows();i++)
+      currV.row(i)<<QRot(origV.row(i), orientation)+COM;
   }
   
-  //the full integration for the time step (velocity + position)
-  void integrate(double timeStep){
-    integrateVelocity(timeStep);
-    integratePosition(timeStep);
+  
+  RowVector3d initStaticProperties(const double density)
+  {
+    //TODO: compute tet volumes and allocate to vertices
+    tetVolumes.conservativeResize(T.rows());
+    
+    RowVector3d naturalCOM; naturalCOM.setZero();
+    Matrix3d IT; IT.setZero();
+    for (int i=0;i<T.rows();i++){
+      Vector3d e01=origV.row(T(i,1))-origV.row(T(i,0));
+      Vector3d e02=origV.row(T(i,2))-origV.row(T(i,0));
+      Vector3d e03=origV.row(T(i,3))-origV.row(T(i,0));
+      Vector3d tetCentroid=(origV.row(T(i,0))+origV.row(T(i,1))+origV.row(T(i,2))+origV.row(T(i,3)))/4.0;
+      tetVolumes(i)=std::abs(e01.dot(e02.cross(e03)))/6.0;
+      
+      naturalCOM+=tetVolumes(i)*tetCentroid;
+      
+    }
+    
+    totalVolume=tetVolumes.sum();
+    totalMass=density*totalVolume;
+    naturalCOM.array()/=totalVolume;
+    
+    //computing inertia tensor
+    for (int i=0;i<T.rows();i++){
+      RowVector4d xvec; xvec<<origV(T(i,0),0)-naturalCOM(0),origV(T(i,1),0)-naturalCOM(0),origV(T(i,2),0)-naturalCOM(0),origV(T(i,3),0)-naturalCOM(0);
+      RowVector4d yvec; yvec<<origV(T(i,0),1)-naturalCOM(1),origV(T(i,1),1)-naturalCOM(1),origV(T(i,2),1)-naturalCOM(1),origV(T(i,3),1)-naturalCOM(1);
+      RowVector4d zvec; zvec<<origV(T(i,0),2)-naturalCOM(2),origV(T(i,1),2)-naturalCOM(2),origV(T(i,2),2)-naturalCOM(2),origV(T(i,3),2)-naturalCOM(2);
+      
+      double I00, I11, I22, I12, I21, I01, I10, I02, I20;
+      Matrix4d sumMat=Matrix4d::Constant(1.0)+Matrix4d::Identity();
+      I00 = density*6*tetVolumes(i)*(yvec*sumMat*yvec.transpose()+zvec*sumMat*zvec.transpose()).sum()/120.0;
+      I11 = density*6*tetVolumes(i)*(xvec*sumMat*xvec.transpose()+zvec*sumMat*zvec.transpose()).sum()/120.0;
+      I22 = density*6*tetVolumes(i)*(xvec*sumMat*xvec.transpose()+yvec*sumMat*yvec.transpose()).sum()/120.0;
+      I12 = I21 = -density*6*tetVolumes(i)*(yvec*sumMat*zvec.transpose()).sum()/120.0;
+      I10 = I01 = -density*6*tetVolumes(i)*(xvec*sumMat*zvec.transpose()).sum()/120.0;
+      I20 = I02 = -density*6*tetVolumes(i)*(xvec*sumMat*yvec.transpose()).sum()/120.0;
+      
+      Matrix3d currIT; currIT<<I00, I01, I02,
+      I10, I11, I12,
+      I20, I21, I22;
+      
+      IT+=currIT;
+      
+    }
+    invIT=IT.inverse();
+    if (isFixed)
+      invIT.setZero();  //infinite resistance to rotation
+  
+    return naturalCOM;
+    
   }
   
   
-  Mesh(const VectorXd& _origPositions, const MatrixXi& boundF, const MatrixXi& _T, const int _globalOffset, const double _youngModulus, const double _poissonRatio, const double _density, const bool _isFixed, const RowVector3d& userCOM, const RowVector4d& userOrientation){
-    origPositions=_origPositions;
-    //cout<<"original origPositions: "<<origPositions<<endl;
-    T=_T;
-    isFixed=_isFixed;
-    globalOffset=_globalOffset;
-    density=_density;
-    poissonRatio=_poissonRatio;
-    youngModulus=_youngModulus;
-    currVelocities=VectorXd::Zero(origPositions.rows());
-    currImpulses=VectorXd::Zero(origPositions.rows());
-    
-    VectorXd naturalCOM=initializeVolumesAndMasses();
-    //cout<<"naturalCOM: "<<naturalCOM<<endl;
-    
-    
-    origPositions-= naturalCOM.replicate(origPositions.rows()/3,1);  //removing the natural COM of the OFF file (natural COM is never used again)
-    //cout<<"after natrualCOM origPositions: "<<origPositions<<endl;
-    
-    for (int i=0;i<origPositions.size();i+=3)
-      origPositions.segment(i,3)<<(QRot(origPositions.segment(i,3).transpose(), userOrientation)+userCOM).transpose();
-    
-    currPositions=origPositions;
+  //Updating the linear and angular velocities of the object
+  //You need to modify this to integrate from acceleration in the field (basically gravity)
+  void updateVelocity(double timeStep){
     
     if (isFixed)
-      invMasses.setZero();
+      return;
     
-    //finding boundary tets
-    VectorXi boundVMask(origPositions.rows()/3);
+    /********
+     TODO: complete from Practical 1
+     *******/
+  }
+  
+  
+  //the full integration for the time step (velocity + position)
+  //You need to modify this if you are changing the integration
+  void integrate(double timeStep){
+    updateVelocity(timeStep);
+    updatePosition(timeStep);
+  }
+  
+  
+  Mesh(const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation){
+    origV=_V;
+    F=_F;
+    T=_T;
+    isFixed=_isFixed;
+    COM=_COM;
+    orientation=_orientation;
+    comVelocity.setZero();
+    angVelocity.setZero();
+    
+    RowVector3d naturalCOM;  //by the geometry of the object
+    
+    //initializes the original geometric properties (COM + IT) of the object
+    naturalCOM = initStaticProperties(density);
+    
+    origV.rowwise()-=naturalCOM;  //removing the natural COM of the OFF file (natural COM is never used again)
+    
+    currV.resize(origV.rows(), origV.cols());
+    for (int i=0;i<currV.rows();i++)
+      currV.row(i)<<QRot(origV.row(i), orientation)+COM;
+    
+    
+    VectorXi boundVMask(origV.rows());
     boundVMask.setZero();
-    for (int i=0;i<boundF.rows();i++)
+    for (int i=0;i<F.rows();i++)
       for (int j=0;j<3;j++)
-        boundVMask(boundF(i,j))=1;
+        boundVMask(F(i,j))=1;
     
-    cout<<"boundVMask.sum(): "<<boundVMask.sum()<<endl;
+    //cout<<"boundVMask.sum(): "<<boundVMask.sum()<<endl;
     
     vector<int> boundTList;
     for (int i=0;i<T.rows();i++){
@@ -391,190 +262,191 @@ public:
     boundTets.resize(boundTList.size());
     for (int i=0;i<boundTets.size();i++)
       boundTets(i)=boundTList[i];
-    
-    ASolver=NULL;
   }
   
+  ~Mesh(){}
 };
-
 
 //This class contains the entire scene operations, and the engine time loop.
 class Scene{
 public:
   double currTime;
+  int numFullV, numFullT;
+  std::vector<Mesh> meshes;
   
-  VectorXd globalPositions;   //3*|V| all positions
-  VectorXd globalVelocities;  //3*|V| all velocities
-  VectorXd globalInvMasses;   //3*|V| all inverse masses  (NOTE: the invMasses in the Mesh class is |v| (one per vertex)!
-  MatrixXi globalT;           //|T|x4 tetraheda in global index
+  //Practical 2
+  vector<Constraint> constraints;   //The (user) constraints of the scene
   
-  vector<Mesh> meshes;
-  
-  vector<Constraint> userConstraints;   //provided from the scene
-  vector<Constraint> barrierConstraints;  //provided by the platform
-  
-  //updates from global values back into mesh values
-  void global2Mesh(){
-    for (int i=0;i<meshes.size();i++){
-      meshes[i].currPositions<<globalPositions.segment(meshes[i].globalOffset, meshes[i].currPositions.size());
-      meshes[i].currVelocities<<globalVelocities.segment(meshes[i].globalOffset, meshes[i].currVelocities.size());
-    }
-  }
-  
-  //update from mesh current values into global values
-  void mesh2global(){
-    for (int i=0;i<meshes.size();i++){
-      globalPositions.segment(meshes[i].globalOffset, meshes[i].currPositions.size())<<meshes[i].currPositions;
-      globalVelocities.segment(meshes[i].globalOffset, meshes[i].currVelocities.size())<< meshes[i].currVelocities;
-    }
+  //adding an objects. You do not need to update this generally
+  void addMesh(const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation){
+    
+    Mesh m(V,F, T, density, isFixed, COM, orientation);
+    meshes.push_back(m);
   }
   
   
-  //This should be called whenever the timestep changes
-  void initScene(double timeStep, const double alpha, const double beta, MatrixXd& viewerV){
+  
+  /*********************************************************************
+   This function handles collision constraints between objects m1 and m2 when found
+   Input: meshes m1, m2
+   depth: the depth of penetration
+   contactNormal: the normal of the conact measured m1->m2
+   penPosition: a point on m2 such that if m2 <= m2 + depth*contactNormal, then penPosition+depth*contactNormal is the common contact point
+   CRCoeff: the coefficient of restitution
+   
+   You should create a "Constraint" class, and use its resolveVelocityConstraint() and resolvePositionConstraint() *alone* to resolve the constraint.
+   You are not allowed to use practical 1 collision handling
+   *********************************************************************/
+  void handleCollision(Mesh& m1, Mesh& m2,const double& depth, const RowVector3d& contactNormal,const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
     
-    for (int i=0;i<meshes.size();i++){
-      if (!meshes[i].isFixed)
-        meshes[i].createGlobalMatrices(timeStep, alpha, beta);
-    }
     
-    mesh2global();
+    //std::cout<<"contactNormal: "<<contactNormal<<std::endl;
+    //std::cout<<"penPosition: "<<penPosition<<std::endl;
     
-    //cout<<"globalPositions: "<<globalPositions<<endl;
-    //updating viewer vertices
-    viewerV.conservativeResize(globalPositions.size()/3,3);
-    for (int i=0;i<globalPositions.size();i+=3)
-      viewerV.row(i/3)<<globalPositions.segment(i,3).transpose();
+    double invMass1 = (m1.isFixed ? 0.0 : 1.0/m1.totalMass);  //fixed meshes have infinite mass
+    double invMass2 = (m2.isFixed ? 0.0 : 1.0/m2.totalMass);
+  
+    /***************
+     TODO: practical 2
+     update m(1,2) comVelocity, angVelocity and COM variables by using a Constraint class of type COLLISION
+     ***********************/
+    
   }
   
   /*********************************************************************
-   This function handles a single time step
-   1. Integrating velocities and position from forces and previous impulses
-   2. detecting collisions and generating collision constraints, alongside with given user constraints
-   3. Resolving constraints iteratively by updating velocities until the system is valid (or maxIterations has passed)
+   This function handles a single time step by:
+   1. Integrating velocities, positions, and orientations by the timeStep
+   2. (Practical 2) Detecting collisions and encoding them as constraints
+   3. (Practical 2) Iteratively resolved positional and velocity constraints
+   
+   You do not need to update this function in Practical 2
    *********************************************************************/
-  
-  void updateScene(double timeStep, double CRCoeff, const double tolerance, const int maxIterations, MatrixXd& viewerV){
+  void updateScene(const double timeStep, const double CRCoeff, const double tolerance, const int maxIterations){
     
-    /*******************1. Integrating velocity and position from external and internal forces************************************/
-    
-    /***************************
-     TODO
-     ***************************/
-    
-    mesh2global();
-    
-    
-    /*******************2. Creating and Aggregating constraints************************************/
-    
-    vector<Constraint> activeConstraints;
-    
-    //user constraints
-    activeConstraints.insert(activeConstraints.end(), userConstraints.begin(), userConstraints.end());
-    
-    //barrier constraints
-    activeConstraints.insert(activeConstraints.end(), barrierConstraints.begin(), barrierConstraints.end());
-    
-    //collision constraints
+    //integrating velocity, position and orientation from forces and previous states
     for (int i=0;i<meshes.size();i++)
-      for (int j=i+1;j<meshes.size(); j++)
-        meshes[i].createCollisionConstraints(meshes[j], i==j, timeStep, CRCoeff, activeConstraints);
+      meshes[i].integrate(timeStep);
+    
+
+    //detecting and handling collisions when found
+    //This is done exhaustively: checking every two objects in the scene.
+    double depth;
+    RowVector3d contactNormal, penPosition;
+    for (int i=0;i<meshes.size();i++)
+      for (int j=i+1;j<meshes.size();j++)
+        if (meshes[i].isCollide(meshes[j],depth, contactNormal, penPosition))
+          handleCollision(meshes[i], meshes[j],depth, contactNormal, penPosition,CRCoeff, tolerance);
     
     
-    /*******************3. Resolving velocity constraints iteratively until the velocities are valid************************************/
+    //Resolving user constraints iteratively until either:
+    //1. Positions or velocities are valid up to tolerance (a full streak of validity in the iteration)
+    //2. maxIterations has run out
     
-    /***************************
-     TODO
-     ***************************/
     
-    global2Mesh();
-    
-    /*******************4. Solving for position drift************************************/
-    
-    mesh2global();
-    
-    /***************************
-     TODO
-     ***************************/
-    
-    global2Mesh();
-    
-    //updating viewer vertices
-    viewerV.conservativeResize(globalPositions.size()/3,3);
-    for (int i=0;i<globalPositions.size();i+=3)
-      viewerV.row(i/3)<<globalPositions.segment(i,3).transpose();
-  }
-  
-  //adding a constraint from the user
-  void addUserConstraint(const int currVertex, const int otherVertex, MatrixXi& viewerEConst)
-  {
-    
-    VectorXi coordIndices(6);
-    coordIndices<<3*currVertex,3*currVertex+1,3*currVertex+2,3*otherVertex,3*otherVertex+1,3*otherVertex+2;
-    
-    VectorXd constraintInvMasses(6);
-    constraintInvMasses<<globalInvMasses(currVertex),globalInvMasses(currVertex),globalInvMasses(currVertex),
-    globalInvMasses(otherVertex),globalInvMasses(otherVertex),globalInvMasses(otherVertex);
-    double refValue=(globalPositions.segment(3*currVertex,3)-globalPositions.segment(3*otherVertex,3)).norm();
-    userConstraints.push_back(Constraint(DISTANCE, EQUALITY, coordIndices, constraintInvMasses, MatrixXd::Zero(1,1), refValue,0.0));
-    
-    viewerEConst.conservativeResize(viewerEConst.rows()+1,2);
-    viewerEConst.row(viewerEConst.rows()-1)<<currVertex, otherVertex;
-    
-  }
-  
-  void setPlatformBarriers(const MatrixXd& platV, const double CRCoeff){
-    
-    RowVector3d minPlatform=platV.colwise().minCoeff();
-    RowVector3d maxPlatform=platV.colwise().maxCoeff();
-    
-    //y value of maxPlatform is lower bound
-    for (int i=1;i<globalPositions.size();i+=3){
-      VectorXi coordIndices(1); coordIndices(0)=i;
-      VectorXd constraintInvMasses(1); constraintInvMasses(0)=globalInvMasses(i);
-      barrierConstraints.push_back(Constraint(BARRIER, INEQUALITY, coordIndices, constraintInvMasses, MatrixXd::Zero(1,1), maxPlatform(1),CRCoeff));
+    //Resolving velocity
+    int currIteration=0;
+    int zeroStreak=0;  //how many consecutive constraints are already below tolerance without any change; the algorithm stops if all are.
+    int currConstIndex=0;
+    while ((zeroStreak<constraints.size())&&(currIteration*constraints.size()<maxIterations)){
+      
+      Constraint currConstraint=constraints[currConstIndex];
+      
+      RowVector3d origConstPos1=meshes[currConstraint.m1].origV.row(currConstraint.v1);
+      RowVector3d origConstPos2=meshes[currConstraint.m2].origV.row(currConstraint.v2);
+      
+      RowVector3d currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation)+meshes[currConstraint.m1].COM;
+      RowVector3d currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation)+meshes[currConstraint.m2].COM;
+      //cout<<"(currConstPos1-currConstPos2).norm(): "<<(currConstPos1-currConstPos2).norm()<<endl;
+      //cout<<"(meshes[currConstraint.m1].currV.row(currConstraint.v1)-meshes[currConstraint.m2].currV.row(currConstraint.v2)).norm(): "<<(meshes[currConstraint.m1].currV.row(currConstraint.v1)-meshes[currConstraint.m2].currV.row(currConstraint.v2)).norm()<<endl;
+      MatrixXd currCOMPositions(2,3); currCOMPositions<<meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
+      MatrixXd currConstPositions(2,3); currConstPositions<<currConstPos1, currConstPos2;
+      MatrixXd currCOMVelocities(2,3); currCOMVelocities<<meshes[currConstraint.m1].comVelocity, meshes[currConstraint.m2].comVelocity;
+      MatrixXd currAngVelocities(2,3); currAngVelocities<<meshes[currConstraint.m1].angVelocity, meshes[currConstraint.m2].angVelocity;
+      
+      Matrix3d invInertiaTensor1=meshes[currConstraint.m1].getCurrInvInertiaTensor();
+      Matrix3d invInertiaTensor2=meshes[currConstraint.m2].getCurrInvInertiaTensor();
+      MatrixXd correctedCOMVelocities, correctedAngVelocities, correctedCOMPositions;
+      
+      bool velocityWasValid=currConstraint.resolveVelocityConstraint(currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities,correctedAngVelocities, tolerance);
+      
+      if (velocityWasValid){
+        zeroStreak++;
+      }else{
+        //only update the COM and angular velocity, don't both updating all currV because it might change again during this loop!
+        zeroStreak=0;
+        meshes[currConstraint.m1].comVelocity =correctedCOMVelocities.row(0);
+        meshes[currConstraint.m2].comVelocity =correctedCOMVelocities.row(1);
+        
+        meshes[currConstraint.m1].angVelocity =correctedAngVelocities.row(0);
+        meshes[currConstraint.m2].angVelocity =correctedAngVelocities.row(1);
+        
+      }
+      
+      currIteration++;
+      currConstIndex=(currConstIndex+1)%(constraints.size());
     }
     
-  }
-  
-  
-  //adding an object.
-  void addMesh(const MatrixXd& V, const MatrixXi& boundF, const MatrixXi& T, const double youngModulus, const double PoissonRatio,  const double density, const bool isFixed, const RowVector3d& userCOM, const RowVector4d userOrientation){
+    if (currIteration*constraints.size()>=maxIterations)
+      cout<<"Velocity Constraint resolution reached maxIterations without resolving!"<<endl;
     
-    VectorXd Vxyz(3*V.rows());
-    for (int i=0;i<V.rows();i++)
-      Vxyz.segment(3*i,3)=V.row(i).transpose();
     
-    //cout<<"Vxyz: "<<Vxyz<<endl;
-    Mesh m(Vxyz,boundF, T, globalPositions.size(), youngModulus, PoissonRatio, density, isFixed, userCOM, userOrientation);
-    meshes.push_back(m);
-    int oldTsize=globalT.rows();
-    globalT.conservativeResize(globalT.rows()+T.rows(),4);
-    globalT.block(oldTsize,0,T.rows(),4)=T.array()+globalPositions.size()/3;  //to offset T to global index
-    globalPositions.conservativeResize(globalPositions.size()+Vxyz.size());
-    globalVelocities.conservativeResize(globalPositions.size());
-    int oldIMsize=globalInvMasses.size();
-    globalInvMasses.conservativeResize(globalPositions.size());
-    for (int i=0;i<m.invMasses.size();i++)
-      globalInvMasses.segment(oldIMsize+3*i,3)=Vector3d::Constant(m.invMasses(i));
+    //Resolving position
+    currIteration=0;
+    zeroStreak=0;  //how many consecutive constraints are already below tolerance without any change; the algorithm stops if all are.
+    currConstIndex=0;
+    while ((zeroStreak<constraints.size())&&(currIteration*constraints.size()<maxIterations)){
+      
+      Constraint currConstraint=constraints[currConstIndex];
+      
+      RowVector3d origConstPos1=meshes[currConstraint.m1].origV.row(currConstraint.v1);
+      RowVector3d origConstPos2=meshes[currConstraint.m2].origV.row(currConstraint.v2);
+      
+      RowVector3d currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation)+meshes[currConstraint.m1].COM;
+      RowVector3d currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation)+meshes[currConstraint.m2].COM;
+
+      MatrixXd currCOMPositions(2,3); currCOMPositions<<meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
+      MatrixXd currConstPositions(2,3); currConstPositions<<currConstPos1, currConstPos2;
     
-    mesh2global();
+      MatrixXd correctedCOMPositions;
+    
+      bool positionWasValid=currConstraint.resolvePositionConstraint(currCOMPositions, currConstPositions,correctedCOMPositions, tolerance);
+      
+      if (positionWasValid){
+        zeroStreak++;
+      }else{
+        //only update the COM and angular velocity, don't both updating all currV because it might change again during this loop!
+        zeroStreak=0;
+
+        meshes[currConstraint.m1].COM =correctedCOMPositions.row(0);
+        meshes[currConstraint.m2].COM =correctedCOMPositions.row(1);
+        
+      }
+      
+      currIteration++;
+      currConstIndex=(currConstIndex+1)%(constraints.size());
+    }
+    
+    if (currIteration*constraints.size()>=maxIterations)
+      cout<<"Position Constraint resolution reached maxIterations without resolving!"<<endl;
+    
+    
+    //updating currV according to corrected COM
+    for (int i=0;i<meshes.size();i++)
+      for (int j=0;j<meshes[i].currV.rows();j++)
+        meshes[i].currV.row(j)<<QRot(meshes[i].origV.row(j), meshes[i].orientation)+meshes[i].COM;
+    
+    currTime+=timeStep;
   }
   
   //loading a scene from the scene .txt files
   //you do not need to update this function
-  bool loadScene(const std::string dataFolder, const std::string sceneFileName, const std::string constraintFileName, MatrixXi& viewerF, MatrixXi& viewerEConst){
+  bool loadScene(const std::string dataFolder, const std::string sceneFileName, const std::string constraintFileName){
     
-    ifstream sceneFileHandle;
-    ifstream constraintFileHandle;
+    ifstream sceneFileHandle, constraintFileHandle;
     sceneFileHandle.open(dataFolder+std::string("/")+sceneFileName);
     if (!sceneFileHandle.is_open())
       return false;
-    
-    constraintFileHandle.open(dataFolder+std::string("/")+constraintFileName);
-    if (!constraintFileHandle.is_open())
-      return false;
-    int numofObjects, numofConstraints;
+    int numofObjects;
     
     currTime=0;
     sceneFileHandle>>numofObjects;
@@ -586,61 +458,39 @@ public:
       double youngModulus, poissonRatio, density;
       RowVector3d userCOM;
       RowVector4d userOrientation;
-      sceneFileHandle>>MESHFileName>>density>>youngModulus>>poissonRatio>>isFixed;
-      sceneFileHandle>>userCOM(0)>>userCOM(1)>>userCOM(2)>>userOrientation(0)>>userOrientation(1)>>userOrientation(2)>>userOrientation(3);
+      sceneFileHandle>>MESHFileName>>density>>youngModulus>>poissonRatio>>isFixed>>userCOM(0)>>userCOM(1)>>userCOM(2)>>userOrientation(0)>>userOrientation(1)>>userOrientation(2)>>userOrientation(3);
       userOrientation.normalize();
-      //if the mesh is an OFF file, tetrahedralize it
-      if (MESHFileName.find(".off") != std::string::npos){
-        MatrixXd VOFF;
-        MatrixXi FOFF;
-        igl::readOFF(dataFolder+std::string("/")+MESHFileName,VOFF,FOFF);
-        if (!isFixed)
-          igl::copyleft::tetgen::tetrahedralize(VOFF,FOFF,"pq1.1", objV,objT,objF);
-        else
-          igl::copyleft::tetgen::tetrahedralize(VOFF,FOFF,"pq1.414Y", objV,objT,objF);
-      } else {
-        igl::readMESH(dataFolder+std::string("/")+MESHFileName,objV,objT, objF);
-      }
+      igl::readMESH(dataFolder+std::string("/")+MESHFileName,objV,objT, objF);
       
       //fixing weird orientation problem
       MatrixXi tempF(objF.rows(),3);
       tempF<<objF.col(2), objF.col(1), objF.col(0);
       objF=tempF;
       
-      int oldFSize=viewerF.rows();
-      viewerF.conservativeResize(viewerF.rows()+objF.rows(),3);
-      viewerF.block(oldFSize,0,objF.rows(),3)=objF.array()+globalPositions.size()/3;
-      //cout<<"objF: "<<objF<<endl;
-      //cout<<"viewerF: "<<viewerF<<endl;
-      addMesh(objV,objF, objT, youngModulus, poissonRatio,  density, isFixed, userCOM, userOrientation);
+      addMesh(objV,objF, objT,density, isFixed, userCOM, userOrientation);
+      cout << "COM: " << userCOM <<endl;
+      cout << "orientation: " << userOrientation <<endl;
     }
     
+    //Practical 2 change
     //reading intra-mesh attachment constraints
+    int numofConstraints;
+    constraintFileHandle.open(dataFolder+std::string("/")+constraintFileName);
+    if (!constraintFileHandle.is_open())
+      return false;
     constraintFileHandle>>numofConstraints;
-    viewerEConst.conservativeResize(numofConstraints,2);
     for (int i=0;i<numofConstraints;i++){
       int attachM1, attachM2, attachV1, attachV2;
       constraintFileHandle>>attachM1>>attachV1>>attachM2>>attachV2;
       
-      VectorXi coordIndices(6);
-      coordIndices<<meshes[attachM1].globalOffset+3*attachV1,
-      meshes[attachM1].globalOffset+3*attachV1+1,
-      meshes[attachM1].globalOffset+3*attachV1+2,
-      meshes[attachM2].globalOffset+3*attachV2,
-      meshes[attachM2].globalOffset+3*attachV2+1,
-      meshes[attachM2].globalOffset+3*attachV2+2;
-      viewerEConst.row(i)<<meshes[attachM1].globalOffset/3+attachV1, meshes[attachM2].globalOffset/3+attachV2;
+      double initDist=(meshes[attachM1].currV.row(attachV1)-meshes[attachM2].currV.row(attachV2)).norm();
+      //cout<<"initDist: "<<initDist<<endl;
+      double invMass1 = (meshes[attachM1].isFixed ? 0.0 : 1.0/meshes[attachM1].totalMass);  //fixed meshes have infinite mass
+      double invMass2 = (meshes[attachM2].isFixed ? 0.0 : 1.0/meshes[attachM2].totalMass);
+      constraints.push_back(Constraint(DISTANCE, EQUALITY,attachM1, attachV1, attachM2, attachV2, invMass1,invMass2,RowVector3d::Zero(), initDist, 0.0));
       
-      VectorXd constraintInvMasses(6);
-      constraintInvMasses<<meshes[attachM1].invMasses(attachV1),
-      meshes[attachM1].invMasses(attachV1),
-      meshes[attachM1].invMasses(attachV1),
-      meshes[attachM2].invMasses(attachV2),
-      meshes[attachM2].invMasses(attachV2),
-      meshes[attachM2].invMasses(attachV2);
-      double refValue=(meshes[attachM1].currPositions.segment(3*attachV1,3)-meshes[attachM2].currPositions.segment(3*attachV2,3)).norm();
-      userConstraints.push_back(Constraint(DISTANCE, EQUALITY, coordIndices, constraintInvMasses, MatrixXd::Zero(0,0), refValue, 0.0));
     }
+    
     return true;
   }
   
@@ -648,7 +498,6 @@ public:
   Scene(){}
   ~Scene(){}
 };
-
 
 
 /*****************************Auxiliary functions for collision detection. Do not need updating********************************/
@@ -660,21 +509,19 @@ void support(const void *_obj, const ccd_vec3_t *_d, ccd_vec3_t *_p)
   // object (in this case box: x, y, z, pos, quat - dimensions of box,
   // position and rotation)
   //std::cout<<"calling support"<<std::endl;
-  MatrixXd *obj = (MatrixXd *)_obj;
+  Mesh *obj = (Mesh *)_obj;
   RowVector3d p;
   RowVector3d d;
   for (int i=0;i<3;i++)
     d(i)=_d->v[i]; //p(i)=_p->v[i];
   
-  
   d.normalize();
   //std::cout<<"d: "<<d<<std::endl;
   
-  RowVector3d objCOM=obj->colwise().mean();
   int maxVertex=-1;
   int maxDotProd=-32767.0;
-  for (int i=0;i<obj->rows();i++){
-    double currDotProd=d.dot(obj->row(i)-objCOM);
+  for (int i=0;i<obj->currV.rows();i++){
+    double currDotProd=d.dot(obj->currV.row(i)-obj->COM);
     if (maxDotProd < currDotProd){
       maxDotProd=currDotProd;
       //std::cout<<"maxDotProd: "<<maxDotProd<<std::endl;
@@ -685,7 +532,7 @@ void support(const void *_obj, const ccd_vec3_t *_d, ccd_vec3_t *_p)
   //std::cout<<"maxVertex: "<<maxVertex<<std::endl;
   
   for (int i=0;i<3;i++)
-    _p->v[i]=(*obj)(maxVertex,i);
+    _p->v[i]=obj->currV(maxVertex,i);
   
   //std::cout<<"end support"<<std::endl;
 }
@@ -699,11 +546,14 @@ void stub_dir(const void *obj1, const void *obj2, ccd_vec3_t *dir)
 
 void center(const void *_obj,ccd_vec3_t *center)
 {
-  MatrixXd *obj = (MatrixXd *)_obj;
-  RowVector3d objCOM=obj->colwise().mean();
+  Mesh *obj = (Mesh *)_obj;
   for (int i=0;i<3;i++)
-    center->v[i]=objCOM(i);
+    center->v[i]=obj->COM(i);
 }
+
+
+
+
 
 
 
