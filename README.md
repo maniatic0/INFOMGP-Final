@@ -17,7 +17,7 @@ The second practical generalizes and extends the first practical, by working wit
 This is the repository for the skeleton on which you will build your second practical. Using CMake allows you to work and submit your code in all platforms. The entire environment is in C++, but most of the "nastier" coding parts have been simplified; for the most part, you only code the mathemtical-physical parts. The environment is otherwise identical to the first practical, including all compilation instructions.
 
 
-##Background
+## Background
 
 The practical is mostly about implementing procedures for velocity and position resolution to satisfy constraints. This resolution integrates into the game-physics engine as follows:
 
@@ -32,11 +32,11 @@ In each scene iteration:
 The constraints we deal with in this practical are purely *holonomic* and bivariate. That is, each constraint $C$ is of the form $C(x_1,x_2)$, where $x_1$ and $x_2$ are two positions on two meshes (can be the same mesh). We distinguish between user constraints, read from file, and collision constraints, created on the fly in each iteration. Moreover, we distinguish between equality constraints $C=0$ and inequality constraints $C \geq 0$; the latter only matters when they are *violated*, and otherwise should not do anything to velocities or positions. In practice, we use some tolerance $\tau$ that measures validity (opting for $|C|<\tau$ for equality constraints), rather then adhere to perfect $0$ which is unattainable numerically.
 
 
-###Working with Rigid Bodies
+### Working with Rigid Bodies
 
 The constraints are expressed using any two points on a body (which happen to be vertices in user constraints); nevertheless, the bodies are rigid, and therefore the only movement degrees of freedom for a mesh are its COM position $p$, orientation quaternion $q$, linear COM velocity $v$ and angular velocity $\omega$. Resolving constraints should only work and change these variables, and not touch any individual vertex. Specifically, never alter ```currV``` directly; rather, recompute it from ```origV``` in the end of a time-step iteration after having corrected $p$ and $q$.
 
-###Velocity Resolution
+### Velocity Resolution
 
 For equality constraints, the total velocities $\overline{v}_1$ and $\overline{v}_2$ should always satisfy $Jv=0$, where $J$ is the gradient of the constraint, and $v$ is a vector comprising $v_1, \omega1, v_2,\omega_2$ in order (sanity check: vector length is $12$ variables). If $Jv \neq 0$, You will be computing $\Delta v$ to satisfy $J(v+\Delta v)=0$, using the Lagrange multiplier method learnt in class (Lecture 6; note collision example in slide 22). This requires setting up an (inverse) mass matrix of $12 \times 12$, with the body masses and (inverse) inertia tensors in order. Use $0$ for inverse mass and inverse inertia tensor for fixed bodies, which will simulate the correct effect. Note that the inertia tensor should rotate like in the first practical; essentially your constraint-based collision resolution should be almost equivalent to what you implemented explicitly before.
 
@@ -46,13 +46,13 @@ The coefficient of restitution is given for collisions constraints in order to i
 
 The user constraints that are read from file attach two vertices from two meshes in a distance that has to be maintained. That is, the constraint is $C(x_1,x_2) = \left|x_1-x_2\right| - d_{12}$, where $d_{12}$ is computed for the position at time $t=0$. You should devise $J$ for that constraint (you have a hint for it in Lecture 9; for intuition, you are supposed to get that the velocities of both vertices should not move in a way that changes this distance, like it's a fixed rod).
 
-###Position Correction
+### Position Correction
 
 Position correction is similar to velocity correction, except that we take the easy route (in the basic practical requirements), and only correct *linearly*. That is, we do not change $q$, only $p$ of every body. That means the mass matrix is only $6 \times 6$ of body masses, without any inertia tensor components, and the Jacobian only contains derivatives relating to linear movement. That generalizes the linear-interpenetration resolution for collisions. Note that this means totally different $J, M, \lambda$ for this step, which do not relate to those computed in the velocity correction stage! The theoretical details are in lecture 9. We do not employ stiffness in this practical.
 
 See below for details on where to do all that in the code.
 
-###Extensions
+### Extensions
 
 The above will earn you $80\%$ of the grade. To get a full $100\%$, you must choose a single extensions out of these 3 extension options, and augment the practical with it. Some choices will require minor adaptations to the GUI or the function structure which are easy to do. The extension will earn you $20\%$, and the exact grading will commensurate with the difficulty. Note that this means that all extensions are equal in grade; if you take on a hard extension, it's your own challenge to complete it well.
 
@@ -65,7 +65,7 @@ The above will earn you $80\%$ of the grade. To get a full $100\%$, you must cho
 You may invent your own extension as substitute to **one** in the list above, but it needs approval on the Lecturer's behalf **beforehand**.
 
 
-##Installation
+## Installation
 
 *This installation is exactly like that of Practical 1, repeated here for completeness*
 
@@ -86,15 +86,15 @@ make
 
 In windows, you need to use [cmake-gui](https://cmake.org/runningcmake/). Pressing twice ``configure`` and then ``generate`` will generate a Visual Studio solution in which you can work. The active soution should be ``practical2_bin``. *Note*: it only seems to work in 64-bit mode. 32-bit mode might give alignment errors.
 
-###Using the dependencies
+### Using the dependencies
 
 You do not need to acquaint yourself much with any dependency, nor install anything auxiliary not mentioned above. For the most part, the dependencies are parts of code that are background, or collision detection code, which is not a direct part of the practical. The most significant exception is [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page) for the representation and manipulation of vectors and matrices. However, it is a quite a shallow learning curve. It is generally possible to learn most necessary aspects (multiplication of matrices and vectors, intialization, etc.) just by looking at the existing code. However, it is advised to go through the "getting started" section on the Eigen website (reading up to and including "Dense matrix and array manipulation" should be enough).
 
-###Working with the repository
+### Working with the repository
 
 All the code you need to update is in the ``practical1`` folder. Please do not attempt to commit any changes to the repository. <span style="color:red">You may ONLY fork the repository for your convenience and work on it if you can somehow make the forked repository PRIVATE afterwards</span>. Solutions to the practical which are published online in any public manner will **disqualify** the students! submission will be done in the "classical" department style of submission servers, published separately.
 
-##The coding environment for the tasks
+## The coding environment for the tasks
 
 You will find the environment almost identical to the first practical, with these main differences:
 
@@ -116,7 +116,7 @@ TODO
 
 The description of the function will tell you what exactly you need to put in. In some functions, you will have to complete parts you already did in the first practical (to avoid "spoilers")---it's a simple copy and paste (if you did it correctly the last time).
 
-###Input
+### Input
 
 The TXT file that describes the scene, where you have several examples in the`data` subfolder, is the same. For completeness, the format of the file is:
 
@@ -153,8 +153,7 @@ mesh_i2 vertex_i2 mesh_j2 vertex_j2
 Each row is a constraint attaching the vertex ```vertex_i1``` of mesh ```mesh_i1``` to ```vertex_j2``` of mesh ```mesh_j2```. Every row is an independent such constraint. You can find TXT files in the data folder with similar name to the scenes they accompany. You can of course write new ones. Note that the meshes start indexing from $1$---if you put a constraint to mesh $0$, it will get attached to the platform (which should still work).
 
 
-
-###User interface
+### User interface
 
 ![screenshot of viewer](practical2_interface.png "screenshot of viewer")
 
@@ -169,7 +168,7 @@ The main difference is that user attachement constraints are highlighted as yell
 Note that the ```demo``` folder contains compiled demos for windows and OsX; they are to be used as inspiration, because every solution can be a bit different (butterfly effect).
 
 
-##Submission
+## Submission
 
 The entire code of the practical has to be submitted in a zip file to the lecturer by E-mail. The deadline is **15/Mar/2019 23:59**. Late submissions will not be acceptable unless approved explicitly.
 
@@ -192,4 +191,4 @@ Here are detailed answers to common questions. Please read through whenever ou h
 
 The practical will be checked during a special session in the deadline date . Every pair will have 10 minutes to shortly present their practical, and be tested by the lecturer with some fresh scene files. In addition, the lecturer will ask every person a short question that should be easy to answer if this person was fully involved in the exercise. This will typically be a double session in our regular slot B; check the calendar.
 
-#Good work!
+# Good work!
