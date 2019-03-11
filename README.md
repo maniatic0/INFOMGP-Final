@@ -1,8 +1,8 @@
 # Practical 2: Constraints
 
-##Handout date: 6/Mar/2019.
+## Handout date: 6/Mar/2019.
 
-##Deadline: 15/Mar/2019 23:59.
+## Deadline: 15/Mar/2019 23:59.
 
 The second practical generalizes and extends the first practical, by working with constraint-based velocity and position resolution. We still work only with rigid bodies. The objectives of the practical are:
 
