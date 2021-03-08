@@ -16,3 +16,4 @@ find_package(LIBIGL REQUIRED QUIET)
 file(GLOB SRCFILES *.cpp *.h *.c)
 add_executable(${PROJECT_NAME}_bin ${SRCFILES})
 target_link_libraries(${PROJECT_NAME}_bin igl::core igl::opengl_glfw igl::opengl_glfw_imgui)
+
