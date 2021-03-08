@@ -1,14 +1,14 @@
 # Practical 2: Constraints
 
-## Handout date: 6/Mar/2019.
+## Handout date: 8/Mar/2021.
 
-## Deadline: 15/Mar/2019 23:59.
+## Deadline: 16/Mar/2021 08:59.
 
 The second practical generalizes and extends the first practical, by working with constraint-based velocity and position resolution. We still work only with rigid bodies. The objectives of the practical are:
 
 1. Implement impulse-based velocity resolution by constraints (Lecture 6).
  <br />
-2. Implement position correction by constraints (Lecture 9).
+2. Implement position correction by constraints (Lecture 7).
  <br />
 3. Generalize collision resolution to work with the implemented constraint-resolution framework.
  <br />
@@ -38,23 +38,23 @@ The constraints are expressed using any two points on a body (which happen to be
 
 ### Velocity Resolution
 
-For equality constraints, the total velocities $\overline{v}_1$ and $\overline{v}_2$ should always satisfy $Jv=0$, where $J$ is the gradient of the constraint, and $v$ is a vector comprising $v_1, \omega1, v_2,\omega_2$ in order (sanity check: vector length is $12$ variables). If $Jv \neq 0$, You will be computing $\Delta v$ to satisfy $J(v+\Delta v)=0$, using the Lagrange multiplier method learnt in class (Lecture 6; note collision example in slide 22). This requires setting up an (inverse) mass matrix of $12 \times 12$, with the body masses and (inverse) inertia tensors in order. Use $0$ for inverse mass and inverse inertia tensor for fixed bodies, which will simulate the correct effect. Note that the inertia tensor should rotate like in the first practical; essentially your constraint-based collision resolution should be almost equivalent to what you implemented explicitly before.
+For equality constraints, the total velocities $\overline{v}_1$ and $\overline{v}_2$ should always satisfy $Jv=0$, where $J$ is the gradient of the constraint, and $v$ is a vector comprising $v_1, \omega_1, v_2,\omega_2$ in order (sanity check: vector length is $12$ variables). If $Jv \neq 0$, You will be computing $\Delta v$ to satisfy $J(v+\Delta v)=0$, using the Lagrange multiplier method learnt in class (Lecture 6). This requires setting up an (inverse) mass matrix of $12 \times 12$, with the body masses and (inverse) inertia tensors in order. Use $0$ for inverse mass and inverse inertia tensor for fixed bodies, which will simulate the correct effect. Note that the inertia tensor should rotate like in the first practical; essentially your constraint-based collision resolution should be almost equivalent to what you implemented explicitly before.
 
 Note: the part in the mass matrix corresponding to the linear velocity has the scalar masses $m_1$ and $m_2$ repeated $3$ times each in the diagonal of the matrix, for the $x,y,z$ components of the respective velocities.
 
 The coefficient of restitution is given for collisions constraints in order to induce elastic velocity bias; you should use it as instructed in class (user constraints set it to $0$ by default).
 
-The user constraints that are read from file attach two vertices from two meshes in a distance that has to be maintained. That is, the constraint is $C(x_1,x_2) = \left|x_1-x_2\right| - d_{12}$, where $d_{12}$ is computed for the position at time $t=0$. You should devise $J$ for that constraint (you have a hint for it in Lecture 9; for intuition, you are supposed to get that the velocities of both vertices should not move in a way that changes this distance, like it's a fixed rod).
+The user constraints that are read from file attach two vertices from two meshes in a distance that has to be maintained. That is, the constraint is $C(x_1,x_2) = \left|x_1-x_2\right| - d_{12}$, where $d_{12}$ is computed for the position at time $t=0$. You should devise $J$ for that constraint (you have a hint for it in Lecture 7; for intuition, you are supposed to get that the velocities of both vertices should only move in a way that doesn't change this distance, like it's a fixed rod).
 
 ### Position Correction
 
-Position correction is similar to velocity correction, except that we take the easy route (in the basic practical requirements), and only correct *linearly*. That is, we do not change $q$, only $p$ of every body. That means the mass matrix is only $6 \times 6$ of body masses, without any inertia tensor components, and the Jacobian only contains derivatives relating to linear movement. That generalizes the linear-interpenetration resolution for collisions. Note that this means totally different $J, M, \lambda$ for this step, which do not relate to those computed in the velocity correction stage! The theoretical details are in lecture 9. We do not employ stiffness in this practical.
+Position correction is similar to velocity correction, except that we take the easy route (in the basic practical requirements), and only correct *linearly*. That is, we do not change $q$, only $p$ of every body. That means the mass matrix is only $6 \times 6$ of body masses, without any inertia tensor components, and the Jacobian only contains derivatives relating to linear movement. That generalizes the linear-interpenetration resolution for collisions. Note that this means totally different $J, M, \lambda$ for this step, which do not relate to those computed in the velocity correction stage! The theoretical details are in lecture 7. We do not employ stiffness in this practical.
 
 See below for details on where to do all that in the code.
 
 ### Extensions
 
-The above will earn you $80\%$ of the grade. To get a full $100\%$, you must choose a single extensions out of these 3 extension options, and augment the practical with it. Some choices will require minor adaptations to the GUI or the function structure which are easy to do. The extension will earn you $20\%$, and the exact grading will commensurate with the difficulty. Note that this means that all extensions are equal in grade; if you take on a hard extension, it's your own challenge to complete it well.
+The above will earn you $80\%$ of the grade. To get a full $100\%$, you must choose *a single* extension out of these 3 extension options, and augment the practical with it. Some choices will require minor adaptations to the GUI or the function structure which are easy to do. The extension will earn you $20\%$, and the exact grading will commensurate with the difficulty. Note that this means that all extensions are equal in grade; if you take on a hard extension, it's your own challenge to complete it well.
 
 1. Make the fixed-distance user constraint more flexible to some extent, and therefore a two-sided inequality constraint (for instance, the fixed rod could then compress or stretch up to $20\%$ from the original $d_{12}$). **Level: easy**
 
@@ -163,18 +163,18 @@ The menu also controls the visual features, and the setting of the coefficient o
 
 The simluation can be run in two modes: continuously, toggled with the `space` key (to stop/run), and step by step, with the `S` key. This behavior is already encoded. The visual update of the scene from the objects is also already encoded.
 
-The main difference is that user attachement constraints are highlighted as yellow cylinders. THey are just markers to a constraint and not real physical objects in the scene (so they can collide etc.).
+The main difference is that user attachement constraints are highlighted as yellow cylinders. They are just markers to a constraint and not real physical objects in the scene (so they can collide etc.).
 
 Note that the ```demo``` folder contains compiled demos for windows and OsX; they are to be used as inspiration, because every solution can be a bit different (butterfly effect).
 
 
 ## Submission
 
-The entire code of the practical has to be submitted in a zip file to the lecturer by E-mail. The deadline is **15/Mar/2019 23:59**. Late submissions will not be acceptable unless approved explicitly.
+The entire code of the practical has to be submitted in a zip file to the lecturer by E-mail. The deadline is **16/Mar/2019 08:59**. Late submissions will not be acceptable unless approved explicitly.
 
 The practical must be done **in pairs**. Doing it alone requires a-priori permission. Any other combination (more than 2 people, or any number not in $\mathbb{N}$) is not allowed.
 
-Unlike the previous practical which was checked in person, this practical will be checked offline by the lecturer (this is due to the unusually large class this year). Please submit only the altered C++ files without any solution files, and they should compile out of the box with the given framework.
+The practical will be checked in class during slots exactly as in Practical 1. Come prepared with a release version, and make sure it runs on all "-scene" and "-scene-constraints" pairs in the data folder (at least attempt to). The public sheet is [here](https://docs.google.com/spreadsheets/d/1Zeo2mPu_wv9xjMrAFdzhcTyMGLOpsJqtaf_4Y4oSp2I/edit#gid=761707023).
 
 ##Frequently Asked Questions
 
@@ -188,7 +188,4 @@ Here are detailed answers to common questions. Please read through whenever ou h
 <span style="color:blue">A:</span>: with the same parameters as your input program: infomgp_practical2 "folder_name_without_slash" "name of txt scene files".
 
 
-
-The practical will be checked during a special session in the deadline date . Every pair will have 10 minutes to shortly present their practical, and be tested by the lecturer with some fresh scene files. In addition, the lecturer will ask every person a short question that should be easy to answer if this person was fully involved in the exercise. This will typically be a double session in our regular slot B; check the calendar.
-
-# Good work!
+# Success!
