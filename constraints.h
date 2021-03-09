@@ -34,8 +34,26 @@ public:
   //currCOMPositions is a 2x3 matrix, where each row is per one of the sides of the constraints; the rest of the relevant variables are similar, and so should the outputs be resized.
   bool resolveVelocityConstraint(const MatrixXd& currCOMPositions, const MatrixXd& currVertexPositions, const MatrixXd& currCOMVelocities, const MatrixXd& currAngularVelocities, const Matrix3d& invInertiaTensor1, const Matrix3d& invInertiaTensor2, MatrixXd& correctedCOMVelocities, MatrixXd& correctedAngularVelocities, double tolerance){
     
-    MatrixXd invMassMatrix=MatrixXd::Zero(12,12);
+      MatrixXd invMassMatrix = MatrixXd::Zero(12,12);
+      for (size_t i = 0; i < 3; i++)
+      {
+          invMassMatrix(i, i) = invMass1;
+          invMassMatrix(i+6, i+6) = invMass2;
+          for (size_t j = 0; j < 3; j++)
+          {
+              invMassMatrix(i + 3, j + 3) = invInertiaTensor1(i, j);
+              invMassMatrix(i + 9, j + 9) = invInertiaTensor2(i, j);
+          }
+      }
     RowVectorXd constGradient(12);
+    VectorXd vel(12);
+    for (size_t i = 0; i < 3; i++)
+    {
+        vel(i) = currCOMVelocities(0, i);
+        vel(i+3) = currAngularVelocities(0, i);
+        vel(i+6) = currCOMVelocities(1, i);
+        vel(i + 9) = currAngularVelocities(2, i);
+    }
     
     
     /**************
