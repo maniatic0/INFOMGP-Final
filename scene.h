@@ -127,6 +127,8 @@ public:
    /********
     TODO: complete from Practical 1
     *******/
+    Matrix3d R = Q2RotMatrix(orientation);
+    return R * invIT * R.transpose();  //change this to your result
   }
   
   
@@ -140,6 +142,15 @@ public:
     /********
      TODO: complete from Practical 1
      *******/
+
+    COM += comVelocity * timeStep;
+    {
+        const RowVector3d tempAngVel = timeStep * angVelocity;
+        orientation = QMult(
+            QExp(RowVector4d(0, tempAngVel.x(), tempAngVel.y(), tempAngVel.z())),
+            orientation
+        );
+    }
     
     for (int i=0;i<currV.rows();i++)
       currV.row(i)<<QRot(origV.row(i), orientation)+COM;
@@ -209,6 +220,9 @@ public:
     /********
      TODO: complete from Practical 1
      *******/
+    RowVector3d gravityVector; gravityVector << 0, -9.81, 0.0;
+
+    comVelocity += gravityVector * timeStep;
   }
   
   
