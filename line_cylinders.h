@@ -11,7 +11,10 @@
 #include <Eigen/Core>
 #include <string>
 #include <vector>
+#define _USE_MATH_DEFINES
 #include <cmath> 
+#include <math.h>
+#undef _USE_MATH_DEFINES
 #include <complex>
 
 
