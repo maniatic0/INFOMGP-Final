@@ -33,7 +33,6 @@ public:
   //returns true if constraint was already valid with "currVelocities", and false otherwise (false means there was a correction done)
   //currCOMPositions is a 2x3 matrix, where each row is per one of the sides of the constraints; the rest of the relevant variables are similar, and so should the outputs be resized.
   bool resolveVelocityConstraint(const MatrixXd& currCOMPositions, const MatrixXd& currVertexPositions, const MatrixXd& currCOMVelocities, const MatrixXd& currAngularVelocities, const Matrix3d& invInertiaTensor1, const Matrix3d& invInertiaTensor2, MatrixXd& correctedCOMVelocities, MatrixXd& correctedAngularVelocities, double tolerance){
-    
       MatrixXd invMassMatrix = MatrixXd::Zero(12,12);
       for (size_t i = 0; i < 3; i++)
       {
@@ -46,17 +45,17 @@ public:
           }
       }
 
-  	Vector3d r0 = currCOMPositions.row(0) - currCOMPositions.row(0);
-    Vector3d r1 = currCOMPositions.row(1) - currCOMPositions.row(1);
+  	Vector3d r0 = currVertexPositions.row(0) - currCOMPositions.row(0);
+    Vector3d r1 = currVertexPositions.row(1) - currCOMPositions.row(1);
   	Vector3d v0 = currCOMVelocities.row(0) + static_cast<RowVector3d>( currAngularVelocities.row(0) ).cross( r0 );
     Vector3d v1 = currCOMVelocities.row(1) + static_cast<RowVector3d>( currAngularVelocities.row(1) ).cross( r1 );
   	Vector3d dv = v0 - v1;
-  	Vector3d n = ( r0 - r1 ).normalized();
+  	Vector3d n = (currVertexPositions.row(0) - currVertexPositions.row(1)).normalized();
   	Vector3d l0 = n.cross( r0 );
     Vector3d l1 = n.cross( r1 );
 
     VectorXd vel(12);
-    VectorXd j(12);
+    VectorXd jT(12);
     for (size_t i = 0; i < 3; i++)
     {
         vel(i) = currCOMVelocities(0, i);
@@ -64,29 +63,50 @@ public:
         vel(i+6) = currCOMVelocities(1, i);
         vel(i + 9) = currAngularVelocities(1, i);
 
-    	j(i) = n(i);
-    	j(i+3) = l0(i);
-    	j(i+6) = -n(i);
-    	j(i+9) = -l1(i);
+    	jT(i) = n(i);
+    	jT(i+3) = l0(i);
+    	jT(i+6) = -n(i);
+    	jT(i+9) = -l1(i);
     }
 
-  	double jv = j.dot(vel);
+    correctedCOMVelocities = currCOMVelocities;
+    correctedAngularVelocities = currAngularVelocities;
+
+  	double jv = jT.dot(vel);
   	if ( constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jv) <= tolerance ||  
         constraintEqualityType == ConstraintEqualityType::INEQUALITY && jv >= -tolerance ) {
-        correctedCOMVelocities = currCOMVelocities;
-  		correctedAngularVelocities = currAngularVelocities;
+
+#if 0
+        cout << "J " << jT << endl;
+        cout << "vel " << vel << endl;
+
+        if (constraintEqualityType == ConstraintEqualityType::EQUALITY)
+        {
+            cout << "Equality Constraint ";
+            cout << "Tolerance reached: " << std::abs(jv) << " <= " << tolerance << endl;
+
+        }
+        else
+        {
+            cout << "Inequality Constraint ";
+            cout << "Tolerance reached: " << jv << " >= " << -tolerance << endl;
+        }
+#endif // 0
+
   		return true;
   	}
 
-  	double lamb = -(1.0 + CRCoeff) * jv / ( j.dot( static_cast<Vector3d>( invMassMatrix * j.transpose() ) ) );
+    VectorXd part1 = static_cast<VectorXd>(invMassMatrix * jT);
+  	double lamb = -(1.0 + CRCoeff) * jv / ( jT.transpose().dot(part1) );
 
-  	Vector3d delV = lamb * static_cast<Vector3d>( invMassMatrix * j.transpose() );
+    VectorXd delV = lamb * static_cast<VectorXd>( invMassMatrix * jT );
+    
     for (size_t i = 0; i < 3; i++)
     {
-        correctedCOMVelocities(0, i) = currCOMVelocities(0, i) + delV(i);
-        correctedCOMVelocities(1, i) = currCOMVelocities(1, i) + delV(i + 6);
-        correctedAngularVelocities(0, i) = currAngularVelocities(0, i) + delV(i + 3);
-        correctedAngularVelocities(1, i) = currAngularVelocities(1, i) + delV(i + 9);
+        correctedCOMVelocities(0, i) += delV(i);
+        correctedCOMVelocities(1, i) += delV(i + 6);
+        correctedAngularVelocities(0, i) += delV(i + 3);
+        correctedAngularVelocities(1, i) += delV(i + 9);
     }
 
   	return false;
