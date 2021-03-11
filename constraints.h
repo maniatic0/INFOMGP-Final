@@ -45,17 +45,52 @@ public:
               invMassMatrix(i + 9, j + 9) = invInertiaTensor2(i, j);
           }
       }
-    RowVectorXd constGradient(12);
+
+  	Vector3d r0 = currCOMPositions.row(0) - currCOMPositions.row(0);
+    Vector3d r1 = currCOMPositions.row(1) - currCOMPositions.row(1);
+  	Vector3d v0 = currCOMVelocities.row(0) + static_cast<RowVector3d>( currAngularVelocities.row(0) ).cross( r0 );
+    Vector3d v1 = currCOMVelocities.row(1) + static_cast<RowVector3d>( currAngularVelocities.row(1) ).cross( r1 );
+  	Vector3d dv = v0 - v1;
+  	Vector3d n = ( r0 - r1 ).normalized();
+  	Vector3d l0 = n.cross( r0 );
+    Vector3d l1 = n.cross( r1 );
+
     VectorXd vel(12);
+    VectorXd j(12);
     for (size_t i = 0; i < 3; i++)
     {
         vel(i) = currCOMVelocities(0, i);
         vel(i+3) = currAngularVelocities(0, i);
         vel(i+6) = currCOMVelocities(1, i);
-        vel(i + 9) = currAngularVelocities(2, i);
+        vel(i + 9) = currAngularVelocities(1, i);
+
+    	j(i) = n(i);
+    	j(i+3) = l0(i);
+    	j(i+6) = -n(i);
+    	j(i+9) = -l1(i);
     }
-    
-    
+
+  	double jv = j.dot(vel);
+  	if ( constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jv) <= tolerance ||  
+        constraintEqualityType == ConstraintEqualityType::INEQUALITY && jv >= -tolerance ) {
+        correctedCOMVelocities = currCOMVelocities;
+  		correctedAngularVelocities = currAngularVelocities;
+  		return true;
+  	}
+
+  	double lamb = -(1.0 + CRCoeff) * jv / ( j.dot( static_cast<Vector3d>( invMassMatrix * j.transpose() ) ) );
+
+  	Vector3d delV = lamb * static_cast<Vector3d>( invMassMatrix * j.transpose() );
+    for (size_t i = 0; i < 3; i++)
+    {
+        correctedCOMVelocities(0, i) = currCOMVelocities(0, i) + delV(i);
+        correctedCOMVelocities(1, i) = currCOMVelocities(1, i) + delV(i + 6);
+        correctedAngularVelocities(0, i) = currAngularVelocities(0, i) + delV(i + 3);
+        correctedAngularVelocities(1, i) = currAngularVelocities(1, i) + delV(i + 9);
+    }
+
+  	return false;
+
     /**************
      TODO: write velocity correction procedure:
      1. If the velocity Constraint is satisfied up to tolerate ("abs(Jv)<=tolerance"), set corrected values to original ones and return true
@@ -64,12 +99,6 @@ public:
      
      Note to differentiate between different constraint types; for inequality constraints you don't do anything unless it's unsatisfied.
      ***************/
-    
-     //Stub code: remove upon implementation
-     correctedCOMVelocities=currCOMVelocities;
-     correctedAngularVelocities=currAngularVelocities;
-     return true;
-     //end of stub code
   }
   
   //projects the position unto the constraint
