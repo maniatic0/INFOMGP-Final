@@ -50,7 +50,7 @@ public:
   	Vector3d v0 = currCOMVelocities.row(0) + static_cast<RowVector3d>( currAngularVelocities.row(0) ).cross( r0 );
     Vector3d v1 = currCOMVelocities.row(1) + static_cast<RowVector3d>( currAngularVelocities.row(1) ).cross( r1 );
   	Vector3d dv = v0 - v1;
-  	Vector3d n = (currVertexPositions.row(0) - currVertexPositions.row(1)).normalized();
+  	Vector3d n = ((currCOMPositions.row(0) + currVertexPositions.row(0)) - (currCOMPositions.row(1) + currVertexPositions.row(1))).normalized();
   	Vector3d l0 = n.cross( r0 );
     Vector3d l1 = n.cross( r1 );
 
@@ -78,7 +78,7 @@ public:
 
 #if 0
         cout << "J " << jT << endl;
-        cout << "vel " << vel << endl;
+        cout << "pos " << vel << endl;
 
         if (constraintEqualityType == ConstraintEqualityType::EQUALITY)
         {
@@ -125,9 +125,68 @@ public:
   //returns true if constraint was already valid with "currPositions"
   bool resolvePositionConstraint(const MatrixXd& currCOMPositions, const MatrixXd& currConstPositions, MatrixXd& correctedCOMPositions, double tolerance){
     
-    MatrixXd invMassMatrix=MatrixXd::Zero(6,6);
-    
-    
+      MatrixXd invMassMatrix = MatrixXd::Zero(6, 6);
+      for (size_t i = 0; i < 3; i++)
+      {
+          invMassMatrix(i, i) = invMass1;
+          invMassMatrix(i + 3, i + 3) = invMass2;
+      }
+
+
+      Vector3d p0 = currConstPositions.row(0);
+      Vector3d p1 = currConstPositions.row(1);
+      Vector3d n = (p0 - p1).normalized();
+
+      VectorXd pos(6);
+      VectorXd jT(6);
+      for (size_t i = 0; i < 3; i++)
+      {
+          pos(i) = p0(i);
+          pos(i + 3) = p1(i);
+
+
+          jT(i) = n(i);
+          jT(i+3) = -n(i);
+      }
+
+      correctedCOMPositions = currCOMPositions;
+
+      double jp = jT.dot(pos) - refValue;
+      if (constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jp) <= tolerance ||
+          constraintEqualityType == ConstraintEqualityType::INEQUALITY && jp >= -tolerance) {
+
+#if 0
+          cout << "J " << jT << endl;
+          cout << "pos " << pos << endl;
+
+          if (constraintEqualityType == ConstraintEqualityType::EQUALITY)
+          {
+              cout << "Equality Constraint ";
+              cout << "Tolerance reached: " << std::abs(jp) << " <= " << tolerance << endl;
+
+          }
+          else
+          {
+              cout << "Inequality Constraint ";
+              cout << "Tolerance reached: " << jp << " >= " << -tolerance << endl;
+          }
+#endif // 0
+
+          return true;
+      }
+
+      VectorXd part1 = static_cast<VectorXd>(invMassMatrix * jT);
+      double lamb = - jp / (jT.transpose().dot(part1));
+
+      VectorXd delP = lamb * static_cast<VectorXd>(invMassMatrix * jT);
+
+      for (size_t i = 0; i < 3; i++)
+      {
+          correctedCOMPositions(0, i) += delP(i);
+          correctedCOMPositions(1, i) += delP(i + 3);
+      }
+
+      return false;
     /**************
      TODO: write position correction procedure:
      1. If the position Constraint is satisfied up to tolerate ("abs(C(p)<=tolerance"), set corrected values to original ones and return true
@@ -136,11 +195,6 @@ public:
      
      Note to differentiate between different constraint types; for inequality constraints you don't do anything unless it's unsatisfied.
      ***************/
-    
-    //Stub code: remove upon implementation
-    correctedCOMPositions=currCOMPositions;
-    return true;
-    //end of stub code
   }
 };
 
