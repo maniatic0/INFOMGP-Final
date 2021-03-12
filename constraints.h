@@ -47,12 +47,9 @@ public:
 
   	Vector3d r0 = currVertexPositions.row(0) - currCOMPositions.row(0);
     Vector3d r1 = currVertexPositions.row(1) - currCOMPositions.row(1);
-  	Vector3d v0 = currCOMVelocities.row(0) + static_cast<RowVector3d>( currAngularVelocities.row(0) ).cross( r0 );
-    Vector3d v1 = currCOMVelocities.row(1) + static_cast<RowVector3d>( currAngularVelocities.row(1) ).cross( r1 );
-  	Vector3d dv = v0 - v1;
-  	Vector3d n = ((currCOMPositions.row(0) + currVertexPositions.row(0)) - (currCOMPositions.row(1) + currVertexPositions.row(1))).normalized();
-  	Vector3d l0 = n.cross( r0 );
-    Vector3d l1 = n.cross( r1 );
+  	Vector3d n = (currVertexPositions.row(0) - currVertexPositions.row(1)).normalized();
+  	Vector3d l0 = r0.cross( n );
+    Vector3d l1 = r1.cross( n );
 
     VectorXd vel(12);
     VectorXd jT(12);
@@ -96,8 +93,7 @@ public:
   		return true;
   	}
 
-    VectorXd part1 = static_cast<VectorXd>(invMassMatrix * jT);
-  	double lamb = -(1.0 + CRCoeff) * jv / ( jT.transpose().dot(part1) );
+  	double lamb = -(1.0 + CRCoeff) * jv / ( jT.transpose().dot(static_cast<VectorXd>(invMassMatrix * jT)) );
 
     VectorXd delV = lamb * static_cast<VectorXd>( invMassMatrix * jT );
     
@@ -106,7 +102,7 @@ public:
         correctedCOMVelocities(0, i) += delV(i);
         correctedCOMVelocities(1, i) += delV(i + 6);
         correctedAngularVelocities(0, i) += delV(i + 3);
-        correctedAngularVelocities(1, i) += delV(i + 9);
+		correctedAngularVelocities(1, i) += delV(i + 9);
     }
 
   	return false;
@@ -175,8 +171,7 @@ public:
           return true;
       }
 
-      VectorXd part1 = static_cast<VectorXd>(invMassMatrix * jT);
-      double lamb = - jp / (jT.transpose().dot(part1));
+      double lamb = - jp / (jT.transpose().dot(static_cast<VectorXd>(invMassMatrix * jT)));
 
       VectorXd delP = lamb * static_cast<VectorXd>(invMassMatrix * jT);
 

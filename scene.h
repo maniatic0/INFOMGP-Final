@@ -68,8 +68,6 @@ public:
   }
   
   bool isCollide(const Mesh& m, double& depth, RowVector3d& intNormal, RowVector3d& intPosition){
-    
-    
     if ((isFixed && m.isFixed))  //collision does nothing
       return false;
     
@@ -123,10 +121,12 @@ public:
   
   
   //return the current inverted inertia tensor around the current COM. Update it by applying the orientation
-  Matrix3d getCurrInvInertiaTensor(){
-   /********
+  Matrix3d getCurrInvInertiaTensor() {
+    /********
     TODO: complete from Practical 1
     *******/
+
+    if ( this->isFixed ) return Matrix3d::Zero();
     Matrix3d R = Q2RotMatrix(orientation);
     return R * invIT * R.transpose();  //change this to your result
   }
@@ -304,23 +304,44 @@ public:
    This function handles collision constraints between objects m1 and m2 when found
    Input: meshes m1, m2
    depth: the depth of penetration
-   contactNormal: the normal of the conact measured m1->m2
+   contactNormal: the normal of the contact measured m1->m2
    penPosition: a point on m2 such that if m2 <= m2 + depth*contactNormal, then penPosition+depth*contactNormal is the common contact point
    CRCoeff: the coefficient of restitution
    
    You should create a "Constraint" class, and use its resolveVelocityConstraint() and resolvePositionConstraint() *alone* to resolve the constraint.
    You are not allowed to use practical 1 collision handling
    *********************************************************************/
-  void handleCollision(Mesh& m1, Mesh& m2,const double& depth, const RowVector3d& contactNormal,const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
-    
-    
+  void handleCollision(Mesh& m1, Mesh& m2, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
     //std::cout<<"contactNormal: "<<contactNormal<<std::endl;
     //std::cout<<"penPosition: "<<penPosition<<std::endl;
     
     double invMass1 = (m1.isFixed ? 0.0 : 1.0/m1.totalMass);  //fixed meshes have infinite mass
     double invMass2 = (m2.isFixed ? 0.0 : 1.0/m2.totalMass);
-  
-    /***************
+
+  	auto constraint = Constraint( ConstraintType::COLLISION, ConstraintEqualityType::EQUALITY, 0, 0, 0, 0, invMass1, invMass2, RowVector3d::Zero(), 0.0, CRCoeff );
+
+  	{
+		MatrixXd currCOMPositions(2,3); currCOMPositions<<m1.COM, m2.COM;
+		MatrixXd currConstPositions(2,3); currConstPositions<<penPosition + depth * contactNormal, penPosition;
+        MatrixXd currCOMVelocities(2,3); currCOMVelocities<<m1.comVelocity, m2.comVelocity;
+        MatrixXd currAngVelocities(2,3); currAngVelocities<<m1.angVelocity, m2.angVelocity;
+
+        Matrix3d invInertiaTensor1=m1.getCurrInvInertiaTensor();
+        Matrix3d invInertiaTensor2=m2.getCurrInvInertiaTensor();
+        MatrixXd correctedCOMVelocities, correctedAngVelocities, correctedCOMPositions;
+
+    	constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
+        constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
+
+    	m1.COM = correctedCOMPositions.row(0);
+  		m2.COM = correctedCOMPositions.row(1);
+    	m1.comVelocity = correctedCOMVelocities.row(0);
+        m2.comVelocity = correctedCOMVelocities.row(1);
+        m1.angVelocity = correctedAngVelocities.row(0);
+        m2.angVelocity = correctedAngVelocities.row(1);
+    }
+  	
+  	/***************
      TODO: practical 2
      update m(1,2) comVelocity, angVelocity and COM variables by using a Constraint class of type COLLISION
      ***********************/
