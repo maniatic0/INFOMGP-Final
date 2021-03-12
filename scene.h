@@ -318,7 +318,7 @@ public:
     double invMass1 = (m1.isFixed ? 0.0 : 1.0/m1.totalMass);  //fixed meshes have infinite mass
     double invMass2 = (m2.isFixed ? 0.0 : 1.0/m2.totalMass);
 
-  	auto constraint = Constraint( ConstraintType::COLLISION, ConstraintEqualityType::EQUALITY, 0, 0, 0, 0, invMass1, invMass2, RowVector3d::Zero(), 0.0, CRCoeff );
+  	auto constraint = Constraint( ConstraintType::COLLISION, ConstraintEqualityType::EQUALITY, 0, 0, 0, 0, invMass1, invMass2, contactNormal, 0.0, CRCoeff );
 
   	{
 		MatrixXd currCOMPositions(2,3); currCOMPositions<<m1.COM, m2.COM;
@@ -522,8 +522,17 @@ public:
       //cout<<"initDist: "<<initDist<<endl;
       double invMass1 = (meshes[attachM1].isFixed ? 0.0 : 1.0/meshes[attachM1].totalMass);  //fixed meshes have infinite mass
       double invMass2 = (meshes[attachM2].isFixed ? 0.0 : 1.0/meshes[attachM2].totalMass);
-      constraints.push_back(Constraint(DISTANCE, EQUALITY,attachM1, attachV1, attachM2, attachV2, invMass1,invMass2,RowVector3d::Zero(), initDist, 0.0));
-      
+#define FIXED_DISTANCE 0
+#if FIXED_DISTANCE
+      constraints.push_back(Constraint(DISTANCE, EQUALITY, attachM1, attachV1, attachM2, attachV2, invMass1, invMass2, RowVector3d::Zero(), initDist, 0.0));
+#else
+      const double ratio = 0.2;
+      constraints.push_back(Constraint(REPELLER, INEQUALITY, attachM1, attachV1, attachM2, attachV2, invMass1, invMass2, RowVector3d::Zero(), initDist * (1.0 - ratio), 0.0));
+      constraints.push_back(Constraint(ATTRACTOR, INEQUALITY, attachM1, attachV1, attachM2, attachV2, invMass1, invMass2, RowVector3d::Zero(), initDist * (1.0 + ratio), 0.0));
+
+
+#endif // FIXED_DISTANCE
+
     }
     
     return true;

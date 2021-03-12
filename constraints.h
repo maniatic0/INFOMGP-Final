@@ -4,7 +4,7 @@
 using namespace Eigen;
 using namespace std;
 
-typedef enum ConstraintType{DISTANCE, COLLISION} ConstraintType;   //You can expand it for more constraints
+typedef enum ConstraintType{DISTANCE, COLLISION, ATTRACTOR, REPELLER = DISTANCE} ConstraintType;   //You can expand it for more constraints
 typedef enum ConstraintEqualityType{EQUALITY, INEQUALITY} ConstraintEqualityType;
 
 //there is such constraints per two variables that are equal. That is, for every attached vertex there are three such constraints for (x,y,z);
@@ -140,14 +140,28 @@ public:
           pos(i) = p0(i);
           pos(i + 3) = p1(i);
 
-
           jT(i) = n(i);
           jT(i+3) = -n(i);
       }
 
       correctedCOMPositions = currCOMPositions;
 
-      double jp = jT.dot(pos) - refValue;
+      double jp;
+      switch (constraintType)
+      {
+      case COLLISION:
+      case DISTANCE:
+          jp = jT.dot(pos) - refValue;
+          break;
+      case ATTRACTOR:
+          jT *= -1.0;
+          jp = refValue + jT.dot(pos);
+          break;
+      default:
+          jp = jT.dot(pos) - refValue;
+          break;
+      }
+
       if (constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jp) <= tolerance ||
           constraintEqualityType == ConstraintEqualityType::INEQUALITY && jp >= -tolerance) {
 
