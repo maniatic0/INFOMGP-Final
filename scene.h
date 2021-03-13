@@ -522,8 +522,12 @@ public:
       //cout<<"initDist: "<<initDist<<endl;
       double invMass1 = (meshes[attachM1].isFixed ? 0.0 : 1.0/meshes[attachM1].totalMass);  //fixed meshes have infinite mass
       double invMass2 = (meshes[attachM2].isFixed ? 0.0 : 1.0/meshes[attachM2].totalMass);
-      constraints.push_back(Constraint(DISTANCE, EQUALITY,attachM1, attachV1, attachM2, attachV2, invMass1,invMass2,RowVector3d::Zero(), initDist, 0.0));
-      
+#if 0
+    	constraints.push_back(Constraint(DISTANCE, EQUALITY,attachM1, attachV1, attachM2, attachV2, invMass1,invMass2,RowVector3d::Zero(), initDist, 0.0));
+#else
+    	constraints.push_back(Constraint(DISTANCE, INEQUALITY_SMALLER,attachM1, attachV1, attachM2, attachV2, invMass1,invMass2,RowVector3d::Zero(), 1.2 * initDist, 0.0));
+        constraints.push_back(Constraint(DISTANCE, INEQUALITY_GREATER,attachM1, attachV1, attachM2, attachV2, invMass1,invMass2,RowVector3d::Zero(), 0.8 * initDist, 0.0));
+#endif
     }
     
     return true;

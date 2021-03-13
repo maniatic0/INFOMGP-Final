@@ -5,7 +5,7 @@ using namespace Eigen;
 using namespace std;
 
 typedef enum ConstraintType{DISTANCE, COLLISION} ConstraintType;   //You can expand it for more constraints
-typedef enum ConstraintEqualityType{EQUALITY, INEQUALITY} ConstraintEqualityType;
+typedef enum ConstraintEqualityType{EQUALITY, INEQUALITY_GREATER, INEQUALITY_SMALLER} ConstraintEqualityType;
 
 //there is such constraints per two variables that are equal. That is, for every attached vertex there are three such constraints for (x,y,z);
 class Constraint{
@@ -70,8 +70,9 @@ public:
     correctedAngularVelocities = currAngularVelocities;
 
   	double jv = jT.dot(vel);
-  	if ( constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jv) <= tolerance ||  
-        constraintEqualityType == ConstraintEqualityType::INEQUALITY && jv >= -tolerance ) {
+  	if ( constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jv) <= tolerance || constraintEqualityType != ConstraintEqualityType::EQUALITY/*||  
+        constraintEqualityType == ConstraintEqualityType::INEQUALITY_GREATER && jv >= -tolerance || 
+        constraintEqualityType == ConstraintEqualityType::INEQUALITY_SMALLER && jv <= tolerance*/ ) { //TODO why does this not work??
 
 #if 0
         cout << "J " << jT << endl;
@@ -120,7 +121,6 @@ public:
   //projects the position unto the constraint
   //returns true if constraint was already valid with "currPositions"
   bool resolvePositionConstraint(const MatrixXd& currCOMPositions, const MatrixXd& currConstPositions, MatrixXd& correctedCOMPositions, double tolerance){
-    
       MatrixXd invMassMatrix = MatrixXd::Zero(6, 6);
       for (size_t i = 0; i < 3; i++)
       {
@@ -149,7 +149,8 @@ public:
 
       double jp = jT.dot(pos) - refValue;
       if (constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jp) <= tolerance ||
-          constraintEqualityType == ConstraintEqualityType::INEQUALITY && jp >= -tolerance) {
+          constraintEqualityType == ConstraintEqualityType::INEQUALITY_GREATER && jp >= -tolerance || 
+          constraintEqualityType == ConstraintEqualityType::INEQUALITY_SMALLER && jp <= tolerance) {
 
 #if 0
           cout << "J " << jT << endl;
