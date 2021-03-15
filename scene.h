@@ -318,8 +318,8 @@ public:
     double invMass1 = (m1.isFixed ? 0.0 : 1.0/m1.totalMass);  //fixed meshes have infinite mass
     double invMass2 = (m2.isFixed ? 0.0 : 1.0/m2.totalMass);
 
-  	auto constraint = Constraint( ConstraintType::COLLISION, ConstraintEqualityType::EQUALITY, 0, 0, 0, 0, invMass1, invMass2, RowVector3d::Zero(), 0.0, CRCoeff );
-
+  	auto constraint = Constraint( ConstraintType::COLLISION, ConstraintEqualityType::EQUALITY, 0, 0, 0, 0, invMass1, invMass2, contactNormal, 0.0, CRCoeff );
+  	
   	{
 		MatrixXd currCOMPositions(2,3); currCOMPositions<<m1.COM, m2.COM;
 		MatrixXd currConstPositions(2,3); currConstPositions<<penPosition + depth * contactNormal, penPosition;
@@ -391,7 +391,8 @@ public:
       
       RowVector3d currConstPos1 = QRot(origConstPos1, meshes[currConstraint.m1].orientation)+meshes[currConstraint.m1].COM;
       RowVector3d currConstPos2 = QRot(origConstPos2, meshes[currConstraint.m2].orientation)+meshes[currConstraint.m2].COM;
-      //cout<<"(currConstPos1-currConstPos2).norm(): "<<(currConstPos1-currConstPos2).norm()<<endl;
+
+    	//cout<<"(currConstPos1-currConstPos2).norm(): "<<(currConstPos1-currConstPos2).norm()<<endl;
       //cout<<"(meshes[currConstraint.m1].currV.row(currConstraint.v1)-meshes[currConstraint.m2].currV.row(currConstraint.v2)).norm(): "<<(meshes[currConstraint.m1].currV.row(currConstraint.v1)-meshes[currConstraint.m2].currV.row(currConstraint.v2)).norm()<<endl;
       MatrixXd currCOMPositions(2,3); currCOMPositions<<meshes[currConstraint.m1].COM, meshes[currConstraint.m2].COM;
       MatrixXd currConstPositions(2,3); currConstPositions<<currConstPos1, currConstPos2;

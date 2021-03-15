@@ -50,6 +50,7 @@ public:
   	Vector3d n = (currVertexPositions.row(0) - currVertexPositions.row(1)).normalized();
   	Vector3d l0 = r0.cross( n );
     Vector3d l1 = r1.cross( n );
+  	double dist = ( currVertexPositions.row(0) - currVertexPositions.row(1) ).norm();
 
     VectorXd vel(12);
     VectorXd jT(12);
@@ -70,31 +71,12 @@ public:
     correctedAngularVelocities = currAngularVelocities;
 
   	double jv = jT.dot(vel);
-  	if ( constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jv) <= tolerance || constraintEqualityType != ConstraintEqualityType::EQUALITY/*||  
-        constraintEqualityType == ConstraintEqualityType::INEQUALITY_GREATER && jv >= -tolerance || 
-        constraintEqualityType == ConstraintEqualityType::INEQUALITY_SMALLER && jv <= tolerance*/ ) { //TODO why does this not work??
 
-#if 0
-        cout << "J " << jT << endl;
-        cout << "pos " << vel << endl;
+	if ( constraintEqualityType == EQUALITY && std::abs(jv) <= tolerance ) return true;
+    if ( constraintEqualityType == INEQUALITY_GREATER && ( refValue - dist <= tolerance || ( refValue - dist >= tolerance && -jv <= tolerance ) ) ) return true;
+    if ( constraintEqualityType == INEQUALITY_SMALLER && ( refValue - dist >= -tolerance || ( refValue - dist <= tolerance && jv <= tolerance ) ) ) return true;
 
-        if (constraintEqualityType == ConstraintEqualityType::EQUALITY)
-        {
-            cout << "Equality Constraint ";
-            cout << "Tolerance reached: " << std::abs(jv) << " <= " << tolerance << endl;
-
-        }
-        else
-        {
-            cout << "Inequality Constraint ";
-            cout << "Tolerance reached: " << jv << " >= " << -tolerance << endl;
-        }
-#endif // 0
-
-  		return true;
-  	}
-
-  	double lamb = -(1.0 + CRCoeff) * jv / ( jT.transpose().dot(static_cast<VectorXd>(invMassMatrix * jT)) );
+  	double lamb = -(1.0 + CRCoeff) * jv / ( jT.transpose().dot(static_cast<VectorXd>(invMassMatrix * jT)));
 
     VectorXd delV = lamb * static_cast<VectorXd>( invMassMatrix * jT );
     
@@ -132,6 +114,7 @@ public:
       Vector3d p0 = currConstPositions.row(0);
       Vector3d p1 = currConstPositions.row(1);
       Vector3d n = (p0 - p1).normalized();
+  	  //std::cout << refVector << std::endl;
 
       VectorXd pos(6);
       VectorXd jT(6);
@@ -140,15 +123,14 @@ public:
           pos(i) = p0(i);
           pos(i + 3) = p1(i);
 
-
           jT(i) = n(i);
           jT(i+3) = -n(i);
       }
 
       correctedCOMPositions = currCOMPositions;
 
-      double jp = jT.dot(pos) - refValue;
-      if (constraintEqualityType == ConstraintEqualityType::EQUALITY && std::abs(jp) <= tolerance ||
+      double jp = std::abs( jT.dot(pos) ) - refValue;
+      if (constraintEqualityType == ConstraintEqualityType::EQUALITY && jp <= tolerance ||
           constraintEqualityType == ConstraintEqualityType::INEQUALITY_GREATER && jp >= -tolerance || 
           constraintEqualityType == ConstraintEqualityType::INEQUALITY_SMALLER && jp <= tolerance) {
 
