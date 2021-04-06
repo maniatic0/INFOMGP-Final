@@ -296,6 +296,7 @@ public:
 //This class contains the entire scene operations, and the engine time loop.
 class Scene{
 public:
+  double breakImpulseMagnitude;
   double currTime;
   int numFullV, numFullT;
   std::unordered_map<size_t, Mesh> meshes;
@@ -356,6 +357,27 @@ public:
 
     	constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
         constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
+
+        if (!m1.isFixed)
+        {
+            RowVector3d arm = penPosition - correctedCOMPositions.row(0);
+
+            RowVector3d linearVelDelta = correctedCOMVelocities.row(0) - m1.comVelocity;
+            RowVector3d angVelDelta = correctedAngVelocities.row(0) - m1.angVelocity;
+
+            RowVector3d impulse = m1.totalMass * (linearVelDelta + angVelDelta.cross(arm));
+            const double impulseMag = impulse.norm();
+
+            if (impulseMag > breakImpulseMagnitude) 
+            {
+                // Magic happens here
+            }
+            else
+            {
+
+            }
+        }
+
 
     	m1.COM = correctedCOMPositions.row(0);
   		m2.COM = correctedCOMPositions.row(1);
