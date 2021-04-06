@@ -2,6 +2,7 @@
 #define SCENE_HEADER_FILE
 
 #include <vector>
+#include <unordered_map>
 #include <fstream>
 #include <igl/bounding_box.h>
 #include <igl/readMESH.h>
@@ -28,6 +29,8 @@ typedef std::pair<RowVector3d,RowVector3d> Impulse;
 //the class the contains each individual rigid objects and their functionality
 class Mesh{
 public:
+  size_t name;
+
   MatrixXd origV;   //original vertex positions, where COM=(0.0,0.0,0.0) - never change this!
   MatrixXd currV;   //current vertex position
   MatrixXi F;   //faces of the tet mesh
@@ -235,7 +238,8 @@ public:
   }
   
   
-  Mesh(const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation){
+  Mesh(const size_t _name, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation){
+    name = _name;
     origV=_V;
     F=_F;
     T=_T;
@@ -278,6 +282,13 @@ public:
     for (int i=0;i<boundTets.size();i++)
       boundTets(i)=boundTList[i];
   }
+
+  Mesh() {
+      name = -1;
+      isFixed = true;
+      comVelocity.setZero();
+      angVelocity.setZero();
+  }
   
   ~Mesh(){}
 };
@@ -287,7 +298,8 @@ class Scene{
 public:
   double currTime;
   int numFullV, numFullT;
-  std::vector<Mesh> meshes;
+  std::unordered_map<size_t, Mesh> meshes;
+  size_t meshNum;
   
   //Practical 2
   vector<Constraint> constraints;   //The (user) constraints of the scene
@@ -295,11 +307,22 @@ public:
   //adding an objects. You do not need to update this generally
   void addMesh(const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation){
     
-    Mesh m(V,F, T, density, isFixed, COM, orientation);
-    meshes.push_back(m);
+    size_t name = meshNum++;
+    Mesh m(name, V,F, T, density, isFixed, COM, orientation);
+    meshes.emplace(name, m);
   }
-  
-  
+
+  void removeMesh(const size_t name)
+  {
+      meshes.erase(name);
+      for (size_t i = constraints.size()-1; i >= 0 ; i--)
+      {
+          if (constraints[i].m1 == name || constraints[i].m2 == name)
+          {
+              constraints.erase(constraints.begin() + i);
+          }
+      }
+  }  
   
   /*********************************************************************
    This function handles collision constraints between objects m1 and m2 when found
@@ -556,7 +579,7 @@ public:
   }
   
   
-  Scene(){}
+  Scene() : meshNum(0){}
   ~Scene(){}
 };
 
