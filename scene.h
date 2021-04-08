@@ -1,6 +1,7 @@
 #ifndef SCENE_HEADER_FILE
 #define SCENE_HEADER_FILE
 
+#include <corecrt_math_defines.h>
 #include <vector>
 #include <unordered_map>
 #include <fstream>
@@ -11,6 +12,8 @@
 #include "auxfunctions.h"
 #include "constraints.h"
 #include <igl/copyleft/tetgen/tetrahedralize.h>
+#include <igl/copyleft/cgal/delaunay_triangulation.h>
+#include <random>
 
 using namespace Eigen;
 using namespace std;
@@ -24,6 +27,8 @@ void center(const void *_obj, ccd_vec3_t *dir);
 
 //Impulse is defined as a pair <position, direction>
 typedef std::pair<RowVector3d,RowVector3d> Impulse;
+
+static std::mt19937 rng(std::random_device());
 
 
 //the class the contains each individual rigid objects and their functionality
@@ -323,7 +328,22 @@ public:
               constraints.erase(constraints.begin() + i);
           }
       }
-  }  
+  }
+
+  static double Random() {
+      static std::uniform_real_distribution<double> dis(0, 1);
+  		return dis(rng);
+  }
+
+  static double NormalizedRandom(double mean, double stddev) {
+      double u1 = Random();
+      double u2 = Random();
+
+      auto randStdNormal = std::sqrt(-2.0f * std::log(u1)) *
+          std::sin(2.0f * M_PI * u2);
+
+      return mean + stddev * randStdNormal;
+  }
   
   /*********************************************************************
    This function handles collision constraints between objects m1 and m2 when found
@@ -336,7 +356,7 @@ public:
    You should create a "Constraint" class, and use its resolveVelocityConstraint() and resolvePositionConstraint() *alone* to resolve the constraint.
    You are not allowed to use practical 1 collision handling
    *********************************************************************/
-  void handleCollision(Mesh& m1, Mesh& m2, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
+  void handleCollision(Mesh& m1, Mesh& m2, vector<size_t>& remove, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
     //std::cout<<"contactNormal: "<<contactNormal<<std::endl;
     //std::cout<<"penPosition: "<<penPosition<<std::endl;
     
@@ -371,6 +391,41 @@ public:
             if (impulseMag > breakImpulseMagnitude) 
             {
                 // Magic happens here
+
+                //Vector2d sites[10];
+            	MatrixXd sites = MatrixXd::Zero(10, 2);
+            	MatrixXi faces;
+
+            	Matrix3d rot = Q2RotMatrix( m1.orientation );
+            	Matrix3d roti = rot.transpose();
+
+            	Vector3d lp = roti * ( penPosition - correctedCOMPositions.row(0) );
+            	Vector3d id = ( roti * impulse ).normalized();
+            	
+                for (int i = 0; i < 10; i++) {
+                    double dist = std::abs(NormalizedRandom(0.5f, 1.0f/2.0f));
+                    double angle = 2.0f * M_PI * Random();
+                	
+                    sites.row(i) = Vector2d(dist * std::cos(angle),dist * std::sin(angle) );
+                }
+
+            	igl::copyleft::cgal::delaunay_triangulation( sites, faces );
+
+            	//TODO DOES NOT WORK WHEN id = unitx OR id = unity -> PLANE IS INFINITE IN THE Z-DIRECTION!
+            	Vector3d nx = id.cross( Vector3d::UnitX() );
+                Vector3d ny = id.cross( Vector3d::UnitY() );
+
+            	for( int i = 0; i < faces.rows(); ++i ) {
+            		Vector3i face = faces.row(i);
+
+            		for ( int j = 0; j < 3; ++j ) {
+            			int k = j < 2 ? j + 1 : 0;
+                        Vector3d p0 = lp + sites.row(face[j]).x * nx + sites.row(face[j]).y * ny;
+                        Vector3d p1 = lp + sites.row(face[k]).x * nx + sites.row(face[k]).y * ny;
+            			Vector3d line = p0 - p1;
+            		}
+            	}
+            	
             }
             else
             {
@@ -405,19 +460,28 @@ public:
   void updateScene(const double timeStep, const double CRCoeff, const double tolerance, const int maxIterations){
     
     //integrating velocity, position and orientation from forces and previous states
-    for (int i=0;i<meshes.size();i++)
-      meshes[i].integrate(timeStep);
+  	for ( auto& mesh_pair : meshes ) {
+  		mesh_pair.second.integrate( timeStep );
+  	}
     
 
     //detecting and handling collisions when found
     //This is done exhaustively: checking every two objects in the scene.
     double depth;
     RowVector3d contactNormal, penPosition;
-    for (int i=0;i<meshes.size();i++)
-      for (int j=i+1;j<meshes.size();j++)
-        if (meshes[i].isCollide(meshes[j],depth, contactNormal, penPosition))
-          handleCollision(meshes[i], meshes[j],depth, contactNormal, penPosition,CRCoeff, tolerance);
-    
+  	vector<size_t> remove = {};
+	for ( auto it0 = meshes.begin(); it0 != std::prev( meshes.end() ); ++it0 ) {
+		for( auto it1 = std::next( it0 ); it1 != meshes.end(); ++it1 ) {
+			if ( it0->second.isCollide( it1->second, depth, contactNormal, penPosition ) ) {
+				handleCollision( it0->second, it1->second, remove, depth, contactNormal, penPosition, CRCoeff, tolerance );
+			}
+		}
+	}
+
+  	for( size_t r : remove ) {
+  		removeMesh( r );
+  	}
+  	
     
     //Resolving user constraints iteratively until either:
     //1. Positions or velocities are valid up to tolerance (a full streak of validity in the iteration)
