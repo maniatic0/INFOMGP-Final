@@ -11,10 +11,13 @@
 #include "volInt.h"
 #include "auxfunctions.h"
 #include "constraints.h"
-#include <igl/delaunay_triangulation.h>
 #include <igl/copyleft/tetgen/tetrahedralize.h>
-#include <igl/predicates/predicates.h>
-//#include <igl/copyleft/cgal/intersect_with_half_space.h>
+#include <igl/delaunay_triangulation.h>
+#include <tetgen/predicates.cxx>
+#include <igl/marching_tets.h>
+
+//#include <igl/predicates/predicates.h>
+#include <igl/copyleft/cgal/intersect_with_half_space.h>
 #include <random>
 
 using namespace Eigen;
@@ -347,38 +350,9 @@ public:
       return mean + stddev * randStdNormal;
   }
 
-  static int orient2dPredicates(const double* pa, const double* pb, const double* pc){
-      const Eigen::Vector2d a(pa[0], pa[1]);
-      const Eigen::Vector2d b(pb[0], pb[1]);
-      const Eigen::Vector2d c(pc[0], pc[1]);
-
-      const auto result = igl::predicates::orient2d<Eigen::Vector2d>(a, b, c);
-
-      if (result == igl::predicates::Orientation::POSITIVE) {
-          return 1;
-      } else if (result == igl::predicates::Orientation::NEGATIVE) {
-          return -1;
-      } else {
-          return 0;
-      }
+	static void SliceMesh( MatrixXd V, MatrixXd F, Vector4d plane ) {
+	  //for every vertex
   }
-
-  static int inCirclePredicates(const double* pa, const double* pb, const double* pc, const double* pd){
-      const Eigen::Vector2d a(pa[0], pa[1]);
-      const Eigen::Vector2d b(pb[0], pb[1]);
-      const Eigen::Vector2d c(pc[0], pc[1]);
-      const Eigen::Vector2d d(pd[0], pd[1]);
-
-      const auto result = igl::predicates::incircle(a, b, c, d);
-
-      if (result == igl::predicates::Orientation::INSIDE) {
-          return 1;
-      } else if (result == igl::predicates::Orientation::OUTSIDE) {
-          return -1;
-      } else {
-          return 0;
-      }
-  };
   
   /*********************************************************************
    This function handles collision constraints between objects m1 and m2 when found
@@ -444,7 +418,11 @@ public:
                     sites.row(i) = Vector2d(dist * std::cos(angle),dist * std::sin(angle) );
                 }
 
-                igl::delaunay_triangulation( sites, orient2dPredicates, inCirclePredicates, faces );
+                igl::delaunay_triangulation( sites, [](auto a, auto b, auto c) {
+	                return orient2d(const_cast<double*>(a), const_cast<double*>(b), const_cast<double*>(c));
+                }, [](auto a, auto b, auto c, auto d) {
+	                    return incircle( const_cast<double*>(a), const_cast<double*>(b), const_cast<double*>(c), const_cast<double*>(d));
+                    }, faces );
 
 
                 if ( std::abs( id.dot(Vector3d::UnitX()) ) >= 0.999 ) {
@@ -468,14 +446,12 @@ public:
             		}
             	}
 
+            	//igl::copyleft::cgal::intersect_with_half_space(  )
+
 
                 
             	
             	
-            }
-            else
-            {
-
             }
         }
 
