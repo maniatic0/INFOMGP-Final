@@ -38,6 +38,7 @@ static std::mt19937 rng = std::mt19937(time(0));
 class Mesh{
 public:
   size_t name;
+  double density;
 
   MatrixXd origV;   //original vertex positions, where COM=(0.0,0.0,0.0) - never change this!
   MatrixXd currV;   //current vertex position
@@ -246,8 +247,9 @@ public:
   }
   
   
-  Mesh(const size_t _name, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation){
+  Mesh(const size_t _name, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double _density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation){
     name = _name;
+    density = _density;
     origV=_V;
     F=_F;
     T=_T;
@@ -260,7 +262,7 @@ public:
     RowVector3d naturalCOM;  //by the geometry of the object
     
     //initializes the original geometric properties (COM + IT) of the object
-    naturalCOM = initStaticProperties(density);
+    naturalCOM = initStaticProperties(_density);
     
     origV.rowwise()-=naturalCOM;  //removing the natural COM of the OFF file (natural COM is never used again)
     
@@ -363,7 +365,7 @@ public:
    You should create a "Constraint" class, and use its resolveVelocityConstraint() and resolvePositionConstraint() *alone* to resolve the constraint.
    You are not allowed to use practical 1 collision handling
    *********************************************************************/
-  void handleCollision(Mesh& m1, Mesh& m2, vector<size_t>& remove, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
+  void handleCollision(Mesh& m1, Mesh& m2, vector<size_t>& remove, vector<Mesh>& toAdd, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance){
     //std::cout<<"contactNormal: "<<contactNormal<<std::endl;
     //std::cout<<"penPosition: "<<penPosition<<std::endl;
     
@@ -385,7 +387,7 @@ public:
     	constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
         constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
 
-        if (!m1.isFixed)
+        if (!m1.isFixed || true)
         {
             RowVector3d arm = penPosition - correctedCOMPositions.row(0);
 
@@ -395,21 +397,45 @@ public:
             RowVector3d impulse = m1.totalMass * (linearVelDelta + angVelDelta.cross(arm));
             const double impulseMag = impulse.norm();
 
-            if (impulseMag > breakImpulseMagnitude) 
+            if (impulseMag > breakImpulseMagnitude || true) 
             {
                 // Magic happens here
+
+                RowVector3d newCOM = correctedCOMPositions.row(0);
 
                 //Vector2d sites[10];
             	MatrixXd sites = MatrixXd::Zero(10, 2);
             	MatrixXi faces;
-
+                   
+                // To local space
             	Matrix3d rot = Q2RotMatrix( m1.orientation );
             	Matrix3d roti = rot.transpose();
-         	
-            	Vector3d lp = roti * ( penPosition - correctedCOMPositions.row(0) ).transpose();
+         	    
+                // Impulse plane
+            	Vector3d lp = roti * ( penPosition - newCOM ).transpose();
             	Vector3d id = ( roti * impulse.transpose() ).normalized();
-            	
-                for (int i = 0; i < 10; i++) {
+
+                // Impulse Frame
+                if (std::abs(id.dot(Vector3d::UnitX())) >= 0.999) {
+                    id.y() = 0.1; id.normalize();
+                }
+                if (std::abs(id.dot(Vector3d::UnitY())) >= 0.999) {
+                    id.x() = 0.1; id.normalize();
+                }
+
+                Vector3d nx = id.cross(Vector3d::UnitX());
+                Vector3d ny = id.cross(Vector3d::UnitY());
+
+                // Bounding box
+                Vector3d VMin1 = m1.origV.colwise().minCoeff().transpose() - lp;
+                Vector3d VMax1 = m1.origV.colwise().maxCoeff().transpose() - lp;
+                sites.row(0) = Vector2d(VMin1.dot(nx), VMin1.dot(ny)); // min-min
+                sites.row(1) = Vector2d(VMax1.dot(nx), VMax1.dot(ny)); // max-max
+                sites.row(2) = Vector2d(sites.row(0).x(), sites.row(1).y()); // min-max
+                sites.row(3) = Vector2d(sites.row(1).x(), sites.row(0).y()); // max-min
+
+            	// Random sites
+                for (int i = 4; i < sites.rows(); i++) {
                     double dist = std::abs(NormalizedRandom(0.5f, 1.0f/2.0f));
                     double angle = 2.0f * M_PI * Random();
                 	
@@ -418,38 +444,76 @@ public:
 
                 igl::copyleft::cgal::delaunay_triangulation( sites, faces );
 
-
-                if ( std::abs( id.dot(Vector3d::UnitX()) ) >= 0.999 ) {
-                	id.y() = 0.1; id.normalize();
-                }
-                if ( std::abs( id.dot(Vector3d::UnitY()) ) >= 0.999 ) {
-                    id.x() = 0.1; id.normalize();
-                }
-            	
-            	Vector3d nx = id.cross( Vector3d::UnitX() );
-                Vector3d ny = id.cross( Vector3d::UnitY() );
-
             	for( int i = 0; i < faces.rows(); ++i ) {
             		Vector3i face = faces.row(i);
+                    
+                    MatrixXd J;
 
-            		for ( int j = 0; j < 3; ++j ) {
-            			int k = j < 2 ? j + 1 : 0;
-                        Vector3d p0 = lp + sites.row(face[j]).coeff(0) * nx + sites.row(face[j]).coeff(1) * ny;
-                        Vector3d p1 = lp + sites.row(face[k]).coeff(0) * nx + sites.row(face[k]).coeff(1) * ny;
-            			Vector3d line = p0 - p1;
-            		}
+                    Vector3d p0 = lp + sites.row(face[0]).coeff(0) * nx + sites.row(face[0]).coeff(1) * ny;
+                    Vector3d p1 = lp + sites.row(face[1]).coeff(0) * nx + sites.row(face[1]).coeff(1) * ny;
+                    Vector3d p2 = lp + sites.row(face[2]).coeff(0) * nx + sites.row(face[2]).coeff(1) * ny;
+
+                    Vector3d line0 = p1 - p0;
+                    Vector3d line1 = p2 - p1;
+                    Vector3d line2 = p0 - p2;
+
+                    // TODO: Check order of cross prod
+                    Vector3d planeNorm0 = -impulse.cross(line0.normalized());
+                    Vector3d planeNorm1 = -impulse.cross(line1.normalized());
+                    Vector3d planeNorm2 = -impulse.cross(line2.normalized());
+
+                    MatrixXd V0;
+                    MatrixXi F0;
+                    MatrixXd V1;
+                    MatrixXi F1;
+                    igl::copyleft::cgal::intersect_with_half_space(m1.origV, m1.F, p0, planeNorm0, V0, F0, J);
+                    igl::copyleft::cgal::intersect_with_half_space(V0, F0, p1, planeNorm1, V1, F1, J);
+                    igl::copyleft::cgal::intersect_with_half_space(V1, F1, p2, planeNorm2, V0, F0, J);
+
+                    if (F0.rows() > 0)
+                    {
+                        // New Mesh
+                        MatrixXi objT, objF;
+                        MatrixXd objV;
+
+                        igl::copyleft::tetgen::tetrahedralize(V0, F0, "pq1.1", objV, objT, objF);
+
+                        // Nat COM
+                        RowVector3d naturalCOM; naturalCOM.setZero();
+                        for (int i = 0; i < objT.rows(); i++) {
+                            Vector3d e01 = objV.row(objT(i, 1)) - objV.row(objT(i, 0));
+                            Vector3d e02 = objV.row(objT(i, 2)) - objV.row(objT(i, 0));
+                            Vector3d e03 = objV.row(objT(i, 3)) - objV.row(objT(i, 0));
+                            Vector3d tetCentroid = (objV.row(objT(i, 0)) + objV.row(objT(i, 1)) + objV.row(objT(i, 2)) + objV.row(objT(i, 3))) / 4.0;
+
+                            naturalCOM += std::abs(e01.dot(e02.cross(e03))) / 6.0 * tetCentroid;
+
+                        }
+
+                        Mesh temp(0, objV, objF, objT, m1.density, false, naturalCOM + newCOM, m1.orientation);
+                        toAdd.push_back(temp);
+                    }
             	}
 
-            	//igl::copyleft::cgal::intersect_with_half_space(  )
+            	// Remove original mesh
+                remove.push_back(m1.name);
+            }
+            else
+            {
+                m1.COM = correctedCOMPositions.row(0);
+                m1.comVelocity = correctedCOMVelocities.row(0);
+                m1.angVelocity = correctedAngVelocities.row(0);
             }
         }
-
-
-    	m1.COM = correctedCOMPositions.row(0);
+        else
+        {
+            m1.COM = correctedCOMPositions.row(0);
+            m1.comVelocity = correctedCOMVelocities.row(0);
+            m1.angVelocity = correctedAngVelocities.row(0);
+        }
+    	
   		m2.COM = correctedCOMPositions.row(1);
-    	m1.comVelocity = correctedCOMVelocities.row(0);
         m2.comVelocity = correctedCOMVelocities.row(1);
-        m1.angVelocity = correctedAngVelocities.row(0);
         m2.angVelocity = correctedAngVelocities.row(1);
     }
   	
@@ -480,11 +544,12 @@ public:
     //This is done exhaustively: checking every two objects in the scene.
     double depth;
     RowVector3d contactNormal, penPosition;
-  	vector<size_t> remove = {};
+    vector<size_t> remove = {};
+    vector<Mesh> toAdd = {};
 	for ( auto it0 = meshes.begin(); it0 != std::prev( meshes.end() ); ++it0 ) {
 		for( auto it1 = std::next( it0 ); it1 != meshes.end(); ++it1 ) {
 			if ( it0->second.isCollide( it1->second, depth, contactNormal, penPosition ) ) {
-				handleCollision( it0->second, it1->second, remove, depth, contactNormal, penPosition, CRCoeff, tolerance );
+				handleCollision( it0->second, it1->second, remove, toAdd, depth, contactNormal, penPosition, CRCoeff, tolerance );
 			}
 		}
 	}
@@ -492,6 +557,12 @@ public:
   	for( size_t r : remove ) {
   		removeMesh( r );
   	}
+
+    for (auto& m : toAdd)
+    {
+        m.name = meshNum++;
+        meshes.emplace(m.name, m);
+    }
   	
     
     //Resolving user constraints iteratively until either:
@@ -676,7 +747,7 @@ public:
   }
   
   
-  Scene() : meshNum(0){}
+  Scene() : meshNum(1){}
   ~Scene(){}
 };
 
