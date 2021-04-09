@@ -70,16 +70,26 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
   RowVector3d platColor; platColor<<0.8,0.8,0.8;
   RowVector3d meshColor; meshColor<<0.8,0.2,0.2;
   viewer.core().align_camera_center(scene.meshes[0].currV);
-  for (int i=0;i<scene.meshes.size();i++){
-    viewer.data_list[i].clear();
-    viewer.data_list[i].set_mesh(scene.meshes[i].currV, scene.meshes[i].F);
-    viewer.data_list[i].set_face_based(true);
-    viewer.data_list[i].set_colors(meshColor);
-    viewer.data_list[i].show_lines=false;
+  int i = 0;
+  for (auto it0 = scene.meshes.begin(); it0 != scene.meshes.end(); ++it0)
+  {
+      if (it0->second.name > 0)
+      {
+          viewer.data_list[i].clear();
+          viewer.data_list[i].set_mesh(it0->second.currV, it0->second.F);
+          viewer.data_list[i].set_face_based(true);
+          viewer.data_list[i].set_colors(meshColor);
+          viewer.data_list[i].show_lines = false;
+          i++;
+      }
   }
-  viewer.data_list[0].show_lines=false;
-  viewer.data_list[0].set_colors(platColor.replicate(scene.meshes[0].F.rows(),1));
-  viewer.data_list[0].set_face_based(true);
+  if (scene.meshes.begin()->second.name > 0)
+  {
+      viewer.data_list[0].show_lines = false;
+      viewer.data_list[0].set_colors(platColor.replicate(scene.meshes.begin()->second.F.rows(), 1));
+      viewer.data_list[0].set_face_based(true);
+  }
+  
   //viewer.core().align_camera_center(scene.meshes[0].currV);
   
   //updating constraint viewing

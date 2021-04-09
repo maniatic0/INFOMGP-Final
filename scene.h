@@ -66,6 +66,11 @@ public:
   //you do not need to update these functions (isBoxCollide and isCollide) unless you are doing a different collision
   
   bool isBoxCollide(const Mesh& m){
+      if (m.name == 0)
+      {
+         return false;
+      }
+
     RowVector3d VMin1=currV.colwise().minCoeff();
     RowVector3d VMax1=currV.colwise().maxCoeff();
     RowVector3d VMin2=m.currV.colwise().minCoeff();
@@ -294,7 +299,7 @@ public:
   }
 
   Mesh() {
-      name = -1;
+      name = 0;
       isFixed = true;
       comVelocity.setZero();
       angVelocity.setZero();
