@@ -12,11 +12,9 @@
 #include "auxfunctions.h"
 #include "constraints.h"
 #include <igl/copyleft/tetgen/tetrahedralize.h>
-#include <igl/delaunay_triangulation.h>
-#include <tetgen/predicates.cxx>
+#include <igl/copyleft/cgal/delaunay_triangulation.h>
 #include <igl/marching_tets.h>
 
-//#include <igl/predicates/predicates.h>
 #include <igl/copyleft/cgal/intersect_with_half_space.h>
 #include <random>
 
@@ -418,11 +416,7 @@ public:
                     sites.row(i) = Vector2d(dist * std::cos(angle),dist * std::sin(angle) );
                 }
 
-                igl::delaunay_triangulation( sites, [](auto a, auto b, auto c) {
-	                return orient2d(const_cast<double*>(a), const_cast<double*>(b), const_cast<double*>(c));
-                }, [](auto a, auto b, auto c, auto d) {
-	                    return incircle( const_cast<double*>(a), const_cast<double*>(b), const_cast<double*>(c), const_cast<double*>(d));
-                    }, faces );
+                igl::copyleft::cgal::delaunay_triangulation( sites, faces );
 
 
                 if ( std::abs( id.dot(Vector3d::UnitX()) ) >= 0.999 ) {
@@ -447,11 +441,6 @@ public:
             	}
 
             	//igl::copyleft::cgal::intersect_with_half_space(  )
-
-
-                
-            	
-            	
             }
         }
 
