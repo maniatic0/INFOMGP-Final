@@ -11,8 +11,10 @@
 #include "volInt.h"
 #include "auxfunctions.h"
 #include "constraints.h"
+#include <igl/delaunay_triangulation.h>
 #include <igl/copyleft/tetgen/tetrahedralize.h>
-#include <igl/copyleft/cgal/delaunay_triangulation.h>
+#include <igl/predicates/predicates.h>
+//#include <igl/copyleft/cgal/intersect_with_half_space.h>
 #include <random>
 
 using namespace Eigen;
@@ -28,7 +30,7 @@ void center(const void *_obj, ccd_vec3_t *dir);
 //Impulse is defined as a pair <position, direction>
 typedef std::pair<RowVector3d,RowVector3d> Impulse;
 
-static std::mt19937 rng(std::random_device());
+static std::mt19937 rng = std::mt19937(time(0));
 
 
 //the class the contains each individual rigid objects and their functionality
@@ -344,6 +346,39 @@ public:
 
       return mean + stddev * randStdNormal;
   }
+
+  static int orient2dPredicates(const double* pa, const double* pb, const double* pc){
+      const Eigen::Vector2d a(pa[0], pa[1]);
+      const Eigen::Vector2d b(pb[0], pb[1]);
+      const Eigen::Vector2d c(pc[0], pc[1]);
+
+      const auto result = igl::predicates::orient2d<Eigen::Vector2d>(a, b, c);
+
+      if (result == igl::predicates::Orientation::POSITIVE) {
+          return 1;
+      } else if (result == igl::predicates::Orientation::NEGATIVE) {
+          return -1;
+      } else {
+          return 0;
+      }
+  }
+
+  static int inCirclePredicates(const double* pa, const double* pb, const double* pc, const double* pd){
+      const Eigen::Vector2d a(pa[0], pa[1]);
+      const Eigen::Vector2d b(pb[0], pb[1]);
+      const Eigen::Vector2d c(pc[0], pc[1]);
+      const Eigen::Vector2d d(pd[0], pd[1]);
+
+      const auto result = igl::predicates::incircle(a, b, c, d);
+
+      if (result == igl::predicates::Orientation::INSIDE) {
+          return 1;
+      } else if (result == igl::predicates::Orientation::OUTSIDE) {
+          return -1;
+      } else {
+          return 0;
+      }
+  };
   
   /*********************************************************************
    This function handles collision constraints between objects m1 and m2 when found
@@ -398,9 +433,9 @@ public:
 
             	Matrix3d rot = Q2RotMatrix( m1.orientation );
             	Matrix3d roti = rot.transpose();
-
-            	Vector3d lp = roti * ( penPosition - correctedCOMPositions.row(0) );
-            	Vector3d id = ( roti * impulse ).normalized();
+         	
+            	Vector3d lp = roti * ( penPosition - correctedCOMPositions.row(0) ).transpose();
+            	Vector3d id = ( roti * impulse.transpose() ).normalized();
             	
                 for (int i = 0; i < 10; i++) {
                     double dist = std::abs(NormalizedRandom(0.5f, 1.0f/2.0f));
@@ -409,9 +444,16 @@ public:
                     sites.row(i) = Vector2d(dist * std::cos(angle),dist * std::sin(angle) );
                 }
 
-            	igl::copyleft::cgal::delaunay_triangulation( sites, faces );
+                igl::delaunay_triangulation( sites, orient2dPredicates, inCirclePredicates, faces );
 
-            	//TODO DOES NOT WORK WHEN id = unitx OR id = unity -> PLANE IS INFINITE IN THE Z-DIRECTION!
+
+                if ( std::abs( id.dot(Vector3d::UnitX()) ) >= 0.999 ) {
+                	id.y() = 0.1; id.normalize();
+                }
+                if ( std::abs( id.dot(Vector3d::UnitY()) ) >= 0.999 ) {
+                    id.x() = 0.1; id.normalize();
+                }
+            	
             	Vector3d nx = id.cross( Vector3d::UnitX() );
                 Vector3d ny = id.cross( Vector3d::UnitY() );
 
@@ -420,11 +462,15 @@ public:
 
             		for ( int j = 0; j < 3; ++j ) {
             			int k = j < 2 ? j + 1 : 0;
-                        Vector3d p0 = lp + sites.row(face[j]).x * nx + sites.row(face[j]).y * ny;
-                        Vector3d p1 = lp + sites.row(face[k]).x * nx + sites.row(face[k]).y * ny;
+                        Vector3d p0 = lp + sites.row(face[j]).coeff(0) * nx + sites.row(face[j]).coeff(1) * ny;
+                        Vector3d p1 = lp + sites.row(face[k]).coeff(0) * nx + sites.row(face[k]).coeff(1) * ny;
             			Vector3d line = p0 - p1;
             		}
             	}
+
+
+                
+            	
             	
             }
             else
