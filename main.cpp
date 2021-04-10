@@ -70,6 +70,7 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
   RowVector3d platColor; platColor<<0.8,0.8,0.8;
   RowVector3d meshColor; meshColor<<0.8,0.2,0.2;
   viewer.core().align_camera_center(scene.meshes[0].currV);
+	viewer.data_list.resize( scene.meshes.size() + 1);
   int i = 0;
   for (auto it0 = scene.meshes.begin(); it0 != scene.meshes.end(); ++it0)
   {

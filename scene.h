@@ -16,6 +16,9 @@
 #include <igl/marching_tets.h>
 #include <igl/vertex_components.h>
 #include <igl/facet_components.h>
+#include <igl/remove_duplicate_vertices.h>
+#include <igl/resolve_duplicated_faces.h>
+#include <igl/copyleft/cgal/convex_hull.h>
 
 #include <igl/copyleft/cgal/intersect_with_half_space.h>
 #include <random>
@@ -70,7 +73,7 @@ public:
 	//you do not need to update these functions (isBoxCollide and isCollide) unless you are doing a different collision
 
 	bool isBoxCollide( const Mesh& m ) {
-		if ( m.name == 0 ) {
+		if ( m.name == 0 || name == 0 ) {
 			return false;
 		}
 
@@ -342,6 +345,7 @@ public:
 
 	void removeMesh( const size_t name ) {
 		meshes.erase( name );
+		if ( constraints.size() == 0 ) return;
 		for ( size_t i = constraints.size() - 1; i >= 0; i-- ) {
 			if ( constraints[i].m1 == name || constraints[i].m2 == name ) {
 				constraints.erase( constraints.begin() + i );
@@ -365,7 +369,7 @@ public:
 	}
 
 	int l = 0;
-	Mesh PrepareMesh( const MatrixXd& V0, const MatrixXi& F0, const RowVector3d& offset, const RowVector4d& orientation, const double density ) {
+	bool PrepareMesh( Mesh& mesh, const MatrixXd& V0, const MatrixXi& F0, const RowVector3d& offset, const RowVector4d& orientation, const double density ) {
 		// New Mesh
 		MatrixXi objT, objF;
 		MatrixXd objV;
@@ -375,8 +379,11 @@ public:
 		str += ".off";
 		igl::writeOFF( str.c_str(), V0, F0 );
 
-		int k = igl::copyleft::tetgen::tetrahedralize( V0, F0, "pq1.1", objV, objT, objF );
-		std::cout << k << std::endl;
+		MatrixXd V1;
+		MatrixXi F1;
+		igl::copyleft::cgal::convex_hull( V0, V1, F1 );
+		const int k = igl::copyleft::tetgen::tetrahedralize( V1, F1, "pq1.1", objV, objT, objF );
+		if (k != 0) return false;
 		
 		RowVector3d naturalCOM;
 		naturalCOM.setZero();
@@ -389,7 +396,12 @@ public:
 			naturalCOM += std::abs( e01.dot( e02.cross( e03 ) ) ) / 6.0 * tetCentroid;
 		}
 
-		return Mesh( 0, objV, objF, objT, density, false, naturalCOM + offset, orientation );
+		mesh = Mesh( 0, V0, F0, objT, density, false, RowVector3d(0, 10, 0), orientation );
+		return true;
+	}
+
+	static Vector2d Cross2d( Vector2d a, Vector2d b ){
+		return Vector2d( a.x() * b.y(), -b.x() * a.y());
 	}
 
 	bool BreakMesh( const Mesh& mesh, std::vector<Mesh>& toAdd, const Vector3d& penPosition, const Vector3d& newCOMPosition, 
@@ -437,6 +449,7 @@ public:
 		sites.row( 3 ) = Vector2d( sites.row( 1 ).x(), sites.row( 0 ).y() ); // max-min
 
 		// Random sites
+		label_a:
 		for ( int i = 4; i < siteCount; ++i ) {
 			double dist  = 0.5 * (sites.row( 1 ) - sites.row( 0 )).norm() * std::abs( NormalizedRandom( 0.5f, 1.0f / 2.0f ) );
 			double angle = 2.0 * M_PI * Random();
@@ -445,6 +458,16 @@ public:
 		}
 
 		igl::copyleft::cgal::delaunay_triangulation( sites, faces );
+
+		for(int i = 0; i < faces.rows(); ++i) {
+			Vector3i face = faces.row( i );
+			Vector2d p0 = sites.row( face[0] );
+			Vector2d p1 = sites.row( face[1] );
+			Vector2d p2 = sites.row( face[2] );
+			double m = 0.1 * (sites.row( 3 ).x() - sites.row( 0 ).x()) * (sites.row( 2 ).y() - sites.row( 0 ).y());
+			
+			if ( 0.5 * Cross2d(p0 - p1, p0 - p2 ).norm() < m) goto label_a;
+		}
 
 		for ( int i = 0; i < faces.rows(); ++i ) {
 			Vector3i face = faces.row( i );
@@ -478,25 +501,46 @@ public:
 			igl::copyleft::cgal::intersect_with_half_space( V1, F1, p2, planeNorm2, V2, F2, J );
 			if ( F2.rows() == 0 ) continue;
 
-			VectorXd CV;
-			VectorXd CF;
-			igl::vertex_components( F2, CV );
+			VectorXi CF;
 			igl::facet_components( F2, CF );
 
-			std::vector<std::vector<RowVector3d>> vers = {};
-			std::vector<std::vector<RowVector3i>> facs = {};
+			for ( int j = 0; j <= CF.maxCoeff(); ++j ) {
+				std::cout << j << std::endl;
+				
+				MatrixXd V3 = V2;	
+				vector<RowVector3i> Fs = {};
+				for ( int k = 0; k < CF.size(); ++k ) {
+					if ( CF.coeff( k ) == j ) Fs.push_back( F2.row(k) );
+				}
 
-			for ( int j = 0; j < CV.maxCoeff(); ++j ) {
-				vers.push_back( std::vector<RowVector3d>{} );
-				facs.push_back( std::vector<RowVector3i>{} );
+				MatrixXi F3 = MatrixXi::Zero( Fs.size(), F2.cols() );
+				for( int k = 0; k < Fs.size(); ++k ) F3.row( k ) = Fs[k];
+
+				MatrixXd V4;
+				MatrixXi F4;
+				VectorXi I;
+				VectorXi J;
+				igl::remove_unreferenced( V3, F3, V4, F4, I, J );
+
+				
+
+				//MatrixXi F5;
+				//igl::resolve_duplicated_faces( F4, F5, J );
+
+				//MatrixXd V5;
+				//MatrixXi F6;
+				//VectorXi VI;
+				//VectorXi VJ;
+				//igl::remove_duplicate_vertices( V4, F5, 0.1, V5, VI, VJ, F6 );
+				
+				Mesh rmesh;
+				bool result = PrepareMesh( rmesh, V4, F4, newCOMPosition.transpose(), mesh.orientation, mesh.density );
+				if ( result ) {
+					toAdd.push_back( std::move(rmesh) );
+					//toAdd[toAdd.size() - 1].comVelocity = newCOMVelocity;
+					//toAdd[toAdd.size() - 1].angVelocity = newAngVelocity;
+				}
 			}
-
-			for ( int j = 0; j < CV.size(); ++j ) vers[CV[j]].push_back( V2.row(j) );
-			for ( int j = 0; j < CF.size(); ++j ) facs[CF[j]].push_back( F2.row(j) );
-
-			toAdd.push_back( PrepareMesh( V2, F2, newCOMPosition.transpose(), mesh.orientation, mesh.density ) );
-			toAdd[toAdd.size() - 1].comVelocity = newCOMVelocity;
-			toAdd[toAdd.size() - 1].angVelocity = newAngVelocity;
 		}
 
 		return toAdd.size() > meshCount;
@@ -541,7 +585,7 @@ public:
 
 			if ( !m1.isFixed ) {
 				const bool result = BreakMesh( m1, toAdd, penPosition.transpose(), correctedCOMPositions.row( 0 ).transpose(), correctedCOMVelocities.row( 0 ).transpose(),
-					correctedAngVelocities.row( 0 ).transpose() );
+					correctedAngVelocities.row( 0 ).transpose(), 6 );
 
 				if ( result ) {
 					remove.push_back( m1.name );
@@ -558,7 +602,7 @@ public:
 
 			if ( !m2.isFixed ) {
 				const bool result = BreakMesh( m2, toAdd, penPosition.transpose(), correctedCOMPositions.row( 1 ).transpose(), correctedCOMVelocities.row( 1 ).transpose(),
-					correctedAngVelocities.row( 1 ).transpose() );
+					correctedAngVelocities.row( 1 ).transpose(), 6 );
 
 				if ( result ) {
 					remove.push_back( m2.name );
