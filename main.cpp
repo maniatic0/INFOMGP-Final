@@ -69,7 +69,7 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
 {
   RowVector3d platColor; platColor<<0.8,0.8,0.8;
   RowVector3d meshColor; meshColor<<0.8,0.2,0.2;
-  viewer.core().align_camera_center(scene.meshes[0].currV);
+  viewer.core().align_camera_center(scene.meshes[0].realV);
 	viewer.data_list.resize( scene.meshes.size() + 1);
   int i = 0;
   for (auto it0 = scene.meshes.begin(); it0 != scene.meshes.end(); ++it0)
@@ -77,7 +77,7 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
       if (it0->second.name > 0)
       {
           viewer.data_list[i].clear();
-          viewer.data_list[i].set_mesh(it0->second.currV, it0->second.F);
+          viewer.data_list[i].set_mesh(it0->second.realV, it0->second.realF);
           viewer.data_list[i].set_face_based(true);
           viewer.data_list[i].set_colors(meshColor);
           viewer.data_list[i].show_lines = false;
@@ -87,7 +87,7 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
   if (scene.meshes.begin()->second.name > 0)
   {
       viewer.data_list[0].show_lines = false;
-      viewer.data_list[0].set_colors(platColor.replicate(scene.meshes.begin()->second.F.rows(), 1));
+      viewer.data_list[0].set_colors(platColor.replicate(scene.meshes.begin()->second.realF.rows(), 1));
       viewer.data_list[0].set_face_based(true);
   }
   
@@ -196,7 +196,7 @@ int main(int argc, char *argv[])
   cout<<"scene file: "<<std::string(argv[2])<<endl;
   //create platform
   createPlatform();
-  scene.addMesh(platV, platF, platT, 10000.0, true, platCOM, platOrientation);
+  scene.addMesh(platV, platF, platV, platF, platT, 10000.0, true, platCOM, platOrientation);
   
   //load scene from file
   scene.loadScene(std::string(argv[1]),std::string(argv[2]),std::string(argv[3]));

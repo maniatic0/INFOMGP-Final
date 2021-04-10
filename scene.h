@@ -4,6 +4,7 @@
 #include <corecrt_math_defines.h>
 #include <vector>
 #include <unordered_map>
+#include <iostream>
 #include <fstream>
 #include <igl/bounding_box.h>
 #include <igl/readMESH.h>
@@ -51,6 +52,10 @@ public:
 	MatrixXd currV; //current vertex position
 	MatrixXi F;     //faces of the tet mesh
 	MatrixXi T;     //Tets in the tet mesh
+	MatrixXd realOrigV; // real mesh
+	MatrixXd realV; // real mesh
+	MatrixXi realF; // real faces
+
 
 	VectorXi boundTets; //indices (from T) of just the boundary tets, for collision
 
@@ -178,6 +183,9 @@ public:
 
 		for ( int i = 0; i < currV.rows(); i++ )
 			currV.row( i ) << QRot( origV.row( i ), orientation ) + COM;
+
+		for (int i = 0; i < realV.rows(); i++)
+			realV.row( i ) << QRot(realOrigV.row(i), orientation) + COM;
 	}
 
 
@@ -264,8 +272,10 @@ public:
 	}
 
 
-	Mesh( const size_t _name, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double _density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation ) {
+	Mesh( const size_t _name, const MatrixXd& _realV, const MatrixXi& _realF, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double _density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation ) {
 		name        = _name;
+		realOrigV	= _realV;
+		realF		= _realF;
 		density     = _density;
 		origV       = _V;
 		F           = _F;
@@ -282,10 +292,15 @@ public:
 		naturalCOM = initStaticProperties( _density );
 
 		origV.rowwise() -= naturalCOM; //removing the natural COM of the OFF file (natural COM is never used again)
+		realOrigV.rowwise() -= naturalCOM;
 
 		currV.resize( origV.rows(), origV.cols() );
 		for ( int i = 0; i < currV.rows(); i++ )
 			currV.row( i ) << QRot( origV.row( i ), orientation ) + COM;
+
+		realV.resize(realOrigV.rows(), realOrigV.cols());
+		for (int i = 0; i < realOrigV.rows(); i++)
+			realV.row(i) << QRot(realOrigV.row(i), orientation) + COM;
 
 
 		VectorXi boundVMask( origV.rows() );
@@ -336,10 +351,10 @@ public:
 	vector<Constraint> constraints; //The (user) constraints of the scene
 
 	//adding an objects. You do not need to update this generally
-	void addMesh( const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation ) {
+	void addMesh(const MatrixXd& realV, const MatrixXi& realF, const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation ) {
 
 		size_t name = meshNum++;
-		Mesh   m( name, V, F, T, density, isFixed, COM, orientation );
+		Mesh   m( name, realV, realF, V, F, T, density, isFixed, COM, orientation );
 		meshes.emplace( name, m );
 	}
 
@@ -383,7 +398,10 @@ public:
 		MatrixXi F1;
 		igl::copyleft::cgal::convex_hull( V0, V1, F1 );
 		const int k = igl::copyleft::tetgen::tetrahedralize( V1, F1, "pq1.1", objV, objT, objF );
-		if (k != 0) return false;
+		if (k != 0) { 
+			std::cout << "Tetgen failed with mesh: " << (l - 1) << std::endl;
+			return false; 
+		}
 		
 		RowVector3d naturalCOM;
 		naturalCOM.setZero();
@@ -396,7 +414,7 @@ public:
 			naturalCOM += std::abs( e01.dot( e02.cross( e03 ) ) ) / 6.0 * tetCentroid;
 		}
 
-		mesh = Mesh( 0, V0, F0, objT, density, false, RowVector3d(0, 10, 0), orientation );
+		mesh = Mesh( 0, V0, F0, objV, objF, objT, density, false, offset, orientation );
 		return true;
 	}
 
@@ -441,8 +459,8 @@ public:
 		Vector3d ny = n.cross( Vector3d::UnitY() );
 
 		// Bounding box
-		Vector3d VMin1 = mesh.origV.colwise().minCoeff().transpose() - lp;
-		Vector3d VMax1 = mesh.origV.colwise().maxCoeff().transpose() - lp;
+		Vector3d VMin1 = mesh.realOrigV.colwise().minCoeff().transpose() - lp;
+		Vector3d VMax1 = mesh.realOrigV.colwise().maxCoeff().transpose() - lp;
 		sites.row( 0 ) = Vector2d( VMin1.dot( nx ), VMin1.dot( ny ) );       // min-min
 		sites.row( 1 ) = Vector2d( VMax1.dot( nx ), VMax1.dot( ny ) );       // max-max
 		sites.row( 2 ) = Vector2d( sites.row( 0 ).x(), sites.row( 1 ).y() ); // min-max
@@ -492,21 +510,28 @@ public:
 			MatrixXd V2;
 			MatrixXi F2;
 			MatrixXd J;
-			igl::copyleft::cgal::intersect_with_half_space( mesh.origV, mesh.F, p0, planeNorm0, V0, F0, J );
-			if ( F0.rows() == 0 ) continue;
+			igl::copyleft::cgal::intersect_with_half_space( mesh.realOrigV, mesh.realF, p0, planeNorm0, V0, F0, J );
+			if (F0.rows() == 0) { 
+				std::cout << "Dissapeard Piece!" << std::endl;
+				continue; 
+			}
 
 			igl::copyleft::cgal::intersect_with_half_space( V0, F0, p1, planeNorm1, V1, F1, J );
-			if ( F1.rows() == 0 ) continue;
+			if ( F1.rows() == 0 ) {
+				std::cout << "Dissapeard Piece!" << std::endl;
+				continue;
+			}
 
 			igl::copyleft::cgal::intersect_with_half_space( V1, F1, p2, planeNorm2, V2, F2, J );
-			if ( F2.rows() == 0 ) continue;
+			if ( F2.rows() == 0 ) {
+				std::cout << "Dissapeard Piece!" << std::endl;
+				continue;
+			}
 
 			VectorXi CF;
 			igl::facet_components( F2, CF );
 
-			for ( int j = 0; j <= CF.maxCoeff(); ++j ) {
-				std::cout << j << std::endl;
-				
+			for ( int j = 0; j <= CF.maxCoeff(); ++j ) {				
 				MatrixXd V3 = V2;	
 				vector<RowVector3i> Fs = {};
 				for ( int k = 0; k < CF.size(); ++k ) {
@@ -537,8 +562,8 @@ public:
 				bool result = PrepareMesh( rmesh, V4, F4, newCOMPosition.transpose(), mesh.orientation, mesh.density );
 				if ( result ) {
 					toAdd.push_back( std::move(rmesh) );
-					//toAdd[toAdd.size() - 1].comVelocity = newCOMVelocity;
-					//toAdd[toAdd.size() - 1].angVelocity = newAngVelocity;
+					toAdd[toAdd.size() - 1].comVelocity = newCOMVelocity;
+					toAdd[toAdd.size() - 1].angVelocity = newAngVelocity;
 				}
 			}
 		}
@@ -557,6 +582,7 @@ public:
 	You should create a "Constraint" class, and use its resolveVelocityConstraint() and resolvePositionConstraint() *alone* to resolve the constraint.
 	You are not allowed to use practical 1 collision handling
 	*********************************************************************/
+	bool protection = false;
 	void handleCollision( Mesh& m1, Mesh& m2, vector<size_t>& remove, vector<Mesh>& toAdd, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance ) {
 		//std::cout<<"contactNormal: "<<contactNormal<<std::endl;
 		//std::cout<<"penPosition: "<<penPosition<<std::endl;
@@ -583,12 +609,13 @@ public:
 			constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
 			constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
 
-			if ( !m1.isFixed ) {
+			if ( !m1.isFixed && !protection) {
 				const bool result = BreakMesh( m1, toAdd, penPosition.transpose(), correctedCOMPositions.row( 0 ).transpose(), correctedCOMVelocities.row( 0 ).transpose(),
 					correctedAngVelocities.row( 0 ).transpose(), 6 );
 
 				if ( result ) {
 					remove.push_back( m1.name );
+					protection = true;
 				} else {
 					m1.COM         = correctedCOMPositions.row( 0 );
 					m1.comVelocity = correctedCOMVelocities.row( 0 );
@@ -600,12 +627,13 @@ public:
 				m1.angVelocity = correctedAngVelocities.row( 0 );
 			}
 
-			if ( !m2.isFixed ) {
+			if ( !m2.isFixed && !protection) {
 				const bool result = BreakMesh( m2, toAdd, penPosition.transpose(), correctedCOMPositions.row( 1 ).transpose(), correctedCOMVelocities.row( 1 ).transpose(),
 					correctedAngVelocities.row( 1 ).transpose(), 6 );
 
 				if ( result ) {
 					remove.push_back( m2.name );
+					protection = true;
 				} else {
 					m2.COM         = correctedCOMPositions.row( 1 );
 					m2.comVelocity = correctedCOMVelocities.row( 1 );
@@ -797,9 +825,11 @@ public:
 				userOrientation( 3 );
 			userOrientation.normalize();
 
+
+			MatrixXd VOFF;
+			MatrixXi FOFF;
 			if ( MESHFileName.find( ".off" ) != std::string::npos ) {
-				MatrixXd VOFF;
-				MatrixXi FOFF;
+				
 				igl::readOFF( dataFolder + std::string( "/" ) + MESHFileName, VOFF, FOFF );
 				RowVectorXd mins = VOFF.colwise().minCoeff();
 				RowVectorXd maxs = VOFF.colwise().maxCoeff();
@@ -812,14 +842,18 @@ public:
 					igl::copyleft::tetgen::tetrahedralize( VOFF, FOFF, "pq1.414Y", objV, objT, objF );
 			} else {
 				igl::readMESH( dataFolder + std::string( "/" ) + MESHFileName, objV, objT, objF );
+				VOFF = objV;
+				FOFF = objF;
 			}
 
 			//fixing weird orientation problem
-			MatrixXi tempF( objF.rows(), 3 );
-			tempF << objF.col( 2 ), objF.col( 1 ), objF.col( 0 );
-			objF = tempF;
+			{
+				MatrixXi tempF(objF.rows(), 3);
+				tempF << objF.col(2), objF.col(1), objF.col(0);
+				objF = tempF;
+			}			
 
-			addMesh( objV, objF, objT, density, isFixed, userCOM, userOrientation );
+			addMesh(VOFF, FOFF, objV, objF, objT, density, isFixed, userCOM, userOrientation );
 			cout << "COM: " << userCOM << endl;
 			cout << "orientation: " << userOrientation << endl;
 		}
