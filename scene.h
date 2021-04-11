@@ -360,11 +360,13 @@ public:
 	void addMesh(const MatrixXd& realV, const MatrixXi& realF, const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation ) {
 
 		size_t name = meshNum++;
+		std::cout << "Added mesh: " << name << std::endl;
 		Mesh   m( name, realV, realF, V, F, T, density, isFixed, COM, orientation );
 		meshes.emplace( name, m );
 	}
 
 	void removeMesh( const size_t name ) {
+		std::cout << "Removed mesh: " << name << std::endl;
 		meshes.erase( name );
 		if ( constraints.size() == 0 ) return;
 		for ( size_t i = constraints.size() - 1; i >= 0; i-- ) {
@@ -395,10 +397,12 @@ public:
 		MatrixXi objT, objF;
 		MatrixXd objV;
 
+		/*
 		std::string str = "newmesh";
 		str += std::to_string( l++ );
 		str += ".off";
 		igl::writeOFF( str.c_str(), V0, F0 );
+		*/
 
 		MatrixXd V1;
 		MatrixXi F1;
@@ -442,16 +446,20 @@ public:
 	}
 
 	bool BreakMesh( const Mesh& mesh, std::vector<Mesh>& toAdd, const Vector3d& penPosition, const Vector3d& newCOMPosition, 
-			const Vector3d& newCOMVelocity, const Vector3d& newAngVelocity, const size_t siteCount = 10 ) {
-		assert( siteCount >= 4 );
+			const Vector3d& newCOMVelocity, const Vector3d& newAngVelocity) {
 
 		size_t meshCount = toAdd.size();
 		Vector3d arm            = penPosition - newCOMPosition;
 		Vector3d linearVelDelta = newCOMVelocity - mesh.comVelocity.transpose();
 		Vector3d angVelDelta    = newAngVelocity - mesh.angVelocity.transpose();
 		Vector3d impulse        = mesh.totalMass * ( linearVelDelta + angVelDelta.cross( arm ) );
-		std::cout <<impulse.norm() << std::endl;
+		const double impulseNorm = impulse.norm();
+		assert(breakImpulseMagnitude > 0);
 		if ( impulse.norm() < breakImpulseMagnitude ) return false;
+
+		const size_t siteCount = 4 + (size_t)round(impulseNorm / breakImpulseMagnitude * (1.0 + 0.3 * Random()));
+		std::cout << "Number of Sites: " << siteCount << std::endl;
+		assert(siteCount >= 4);
 
 		MatrixXd sites = MatrixXd::Zero( siteCount, 2 );
 		MatrixXi faces;
@@ -462,14 +470,17 @@ public:
 
 		// Impulse plane
 		Vector3d lp = roti * ( penPosition - newCOMPosition );
-		Vector3d n = ( roti * impulse ).normalized();
+		Vector3d n = ( roti * impulse ) / impulseNorm;
 
 		Vector3d VMin1 = mesh.realOrigV.colwise().minCoeff().transpose() - lp;
 		Vector3d VMax1 = mesh.realOrigV.colwise().maxCoeff().transpose() - lp;
 
 		VMin1 -= VMin1.dot(n) * n;
 		VMax1 -= VMax1.dot(n) * n;
-		Vector3d diag = VMax1 - VMin1;
+
+		Vector3d newMax = VMax1.cwiseMax(VMin1);
+		Vector3d newMin = VMax1.cwiseMin(VMin1);
+		Vector3d diag = newMax - newMin;
 		Vector3d diagNormalized = diag.normalized();
 		AngleAxisd localRot = AngleAxisd(0.25 * M_PI, n);
 
@@ -477,8 +488,10 @@ public:
 		Vector3d ny = localRot.inverse() * diagNormalized;
 
 		// Bounding box
-		sites.row( 0 ) = Vector2d( VMin1.dot( nx ), VMin1.dot( ny ) );       // min-min
-		sites.row( 1 ) = Vector2d( VMax1.dot( nx ), VMax1.dot( ny ) );       // max-max
+		Vector2d min2d = Vector2d(newMin.dot(nx), newMin.dot(ny));
+		Vector2d max2d = Vector2d(newMax.dot(nx), newMax.dot(ny));
+		sites.row( 0 ) = min2d;       // min-min
+		sites.row( 1 ) = max2d;       // max-max
 		sites.row( 2 ) = Vector2d( sites.row( 0 ).x(), sites.row( 1 ).y() ); // min-max
 		sites.row( 3 ) = Vector2d( sites.row( 1 ).x(), sites.row( 0 ).y() ); // max-min
 
@@ -489,6 +502,7 @@ public:
 			double angle = 2.0 * M_PI * Random();
 
 			sites.row( i ) = Vector2d( dist * std::cos( angle ), dist * std::sin( angle ) );
+			// TODO: Get distance to border, use cwiseMax and cwiseMin
 		}
 
 		igl::copyleft::cgal::delaunay_triangulation( sites, faces );
@@ -637,9 +651,9 @@ public:
 			constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
 			constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
 
-			if ( !m1.isFixed && !protection) {
+			if ( !m1.isFixed) {
 				const bool result = BreakMesh( m1, toAdd, penPosition.transpose(), correctedCOMPositions.row( 0 ).transpose(), correctedCOMVelocities.row( 0 ).transpose(),
-					correctedAngVelocities.row( 0 ).transpose(), 6 );
+					correctedAngVelocities.row( 0 ).transpose());
 
 				if ( result ) {
 					remove.push_back( m1.name );
@@ -655,9 +669,9 @@ public:
 				m1.angVelocity = correctedAngVelocities.row( 0 );
 			}
 
-			if ( !m2.isFixed && !protection) {
+			if ( !m2.isFixed) {
 				const bool result = BreakMesh( m2, toAdd, penPosition.transpose(), correctedCOMPositions.row( 1 ).transpose(), correctedCOMVelocities.row( 1 ).transpose(),
-					correctedAngVelocities.row( 1 ).transpose(), 6 );
+					correctedAngVelocities.row( 1 ).transpose());
 
 				if ( result ) {
 					remove.push_back( m2.name );
@@ -717,6 +731,7 @@ public:
 
 		for ( auto& m : toAdd ) {
 			m.name = meshNum++;
+			std::cout << "Added Collision mesh: " << m.name << std::endl;
 			meshes.emplace( m.name, m );
 		}
 

@@ -71,6 +71,8 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
   RowVector3d meshColor; meshColor<<0.8,0.2,0.2;
   
   viewer.data_list.resize( scene.meshes.size() + 1);
+
+  const auto platMeshIter = scene.meshes.find(1);
   int i = 0;
   for (auto it0 = scene.meshes.begin(); it0 != scene.meshes.end(); ++it0)
   {
@@ -84,7 +86,8 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
           i++;
       }
   }
-  const auto platMeshIter = scene.meshes.find(1);
+  viewer.data_list.resize(i + 1);
+  
   if (platMeshIter != scene.meshes.end())
   {
       viewer.core().align_camera_center(platMeshIter->second.realV);
