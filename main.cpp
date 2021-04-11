@@ -69,8 +69,8 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
 {
   RowVector3d platColor; platColor<<0.8,0.8,0.8;
   RowVector3d meshColor; meshColor<<0.8,0.2,0.2;
-  viewer.core().align_camera_center(scene.meshes[0].realV);
-	viewer.data_list.resize( scene.meshes.size() + 1);
+  
+  viewer.data_list.resize( scene.meshes.size() + 1);
   int i = 0;
   for (auto it0 = scene.meshes.begin(); it0 != scene.meshes.end(); ++it0)
   {
@@ -84,10 +84,12 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
           i++;
       }
   }
-  if (scene.meshes.begin()->second.name > 0)
+  const auto platMeshIter = scene.meshes.find(1);
+  if (platMeshIter != scene.meshes.end())
   {
+      viewer.core().align_camera_center(platMeshIter->second.realV);
       viewer.data_list[0].show_lines = false;
-      viewer.data_list[0].set_colors(platColor.replicate(scene.meshes.begin()->second.realF.rows(), 1));
+      viewer.data_list[0].set_colors(platColor.replicate(platMeshIter->second.realF.rows(), 1));
       viewer.data_list[0].set_face_based(true);
   }
   
