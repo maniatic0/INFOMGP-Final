@@ -22,6 +22,7 @@
 #include <igl/copyleft/cgal/convex_hull.h>
 
 #include <igl/copyleft/cgal/intersect_with_half_space.h>
+
 #include <random>
 
 using namespace Eigen;
@@ -432,7 +433,7 @@ public:
 			objF = tempF;
 		}
 
-		mesh = Mesh( 0, V0, F0, objV, objF, objT, density, true, offset + QRot(naturalCOM, orientation), orientation );
+		mesh = Mesh( 0, V0, F0, objV, objF, objT, density, false, offset + QRot(naturalCOM, orientation), orientation );
 		return true;
 	}
 
@@ -463,22 +464,19 @@ public:
 		Vector3d lp = roti * ( penPosition - newCOMPosition );
 		Vector3d n = ( roti * impulse ).normalized();
 
-		// Impulse Frame
-		if ( std::abs( n.dot( Vector3d::UnitX() ) ) >= 0.999 ) {
-			n.y() = 0.1;
-			n.normalize();
-		}
-		if ( std::abs( n.dot( Vector3d::UnitY() ) ) >= 0.999 ) {
-			n.x() = 0.1;
-			n.normalize();
-		}
-
-		Vector3d nx = n.cross( Vector3d::UnitX() );
-		Vector3d ny = n.cross( Vector3d::UnitY() );
-
-		// Bounding box
 		Vector3d VMin1 = mesh.realOrigV.colwise().minCoeff().transpose() - lp;
 		Vector3d VMax1 = mesh.realOrigV.colwise().maxCoeff().transpose() - lp;
+
+		VMin1 -= VMin1.dot(n) * n;
+		VMax1 -= VMax1.dot(n) * n;
+		Vector3d diag = VMax1 - VMin1;
+		Vector3d diagNormalized = diag.normalized();
+		AngleAxisd localRot = AngleAxisd(0.25 * M_PI, n);
+
+		Vector3d nx = localRot * diagNormalized;
+		Vector3d ny = localRot.inverse() * diagNormalized;
+
+		// Bounding box
 		sites.row( 0 ) = Vector2d( VMin1.dot( nx ), VMin1.dot( ny ) );       // min-min
 		sites.row( 1 ) = Vector2d( VMax1.dot( nx ), VMax1.dot( ny ) );       // max-max
 		sites.row( 2 ) = Vector2d( sites.row( 0 ).x(), sites.row( 1 ).y() ); // min-max
