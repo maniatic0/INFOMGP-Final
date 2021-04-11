@@ -37,7 +37,12 @@ void center( const void* _obj, ccd_vec3_t* dir );
 //Impulse is defined as a pair <position, direction>
 typedef std::pair<RowVector3d, RowVector3d> Impulse;
 
-static std::mt19937 rng = std::mt19937( time( 0 ) );
+#define FIX_RNG 1
+#if FIX_RNG
+static std::mt19937 rng = std::mt19937( 0 );
+#else
+static std::mt19937 rng = std::mt19937(time(0));
+#endif
 
 
 
@@ -389,7 +394,7 @@ public:
 		MatrixXi objT, objF;
 		MatrixXd objV;
 
-		std::string str = "newfile";
+		std::string str = "newmesh";
 		str += std::to_string( l++ );
 		str += ".off";
 		igl::writeOFF( str.c_str(), V0, F0 );
@@ -397,24 +402,37 @@ public:
 		MatrixXd V1;
 		MatrixXi F1;
 		igl::copyleft::cgal::convex_hull( V0, V1, F1 );
-		const int k = igl::copyleft::tetgen::tetrahedralize( V1, F1, "pq1.1", objV, objT, objF );
+		const int k = igl::copyleft::tetgen::tetrahedralize( V1, F1, "pYQ", objV, objT, objF );
 		if (k != 0) { 
-			std::cout << "Tetgen failed with mesh: " << (l - 1) << std::endl;
+			std::cout << "\tTetgen failed with mesh: " << (l - 1) << std::endl;
 			return false; 
 		}
-		
-		RowVector3d naturalCOM;
-		naturalCOM.setZero();
-		for ( int i = 0; i < objT.rows(); ++i ) {
-			Vector3d e01         = objV.row( objT( i, 1 ) ) - objV.row( objT( i, 0 ) );
-			Vector3d e02         = objV.row( objT( i, 2 ) ) - objV.row( objT( i, 0 ) );
-			Vector3d e03         = objV.row( objT( i, 3 ) ) - objV.row( objT( i, 0 ) );
-			Vector3d tetCentroid = ( objV.row( objT( i, 0 ) ) + objV.row( objT( i, 1 ) ) + objV.row( objT( i, 2 ) ) + objV.row( objT( i, 3 ) ) ) / 4.0;
 
-			naturalCOM += std::abs( e01.dot( e02.cross( e03 ) ) ) / 6.0 * tetCentroid;
+		RowVector3d naturalCOM;
+		double vol = 0;
+		naturalCOM.setZero();
+		for (int i = 0; i < objT.rows(); i++) {
+			Vector3d e01 = objV.row(objT(i, 1)) - objV.row(objT(i, 0));
+			Vector3d e02 = objV.row(objT(i, 2)) - objV.row(objT(i, 0));
+			Vector3d e03 = objV.row(objT(i, 3)) - objV.row(objT(i, 0));
+			Vector3d tetCentroid = (objV.row(objT(i, 0)) + objV.row(objT(i, 1)) + objV.row(objT(i, 2)) + objV.row(objT(i, 3))) / 4.0;
+
+			const double tempVol = std::abs(e01.dot(e02.cross(e03))) / 6.0;
+			vol += tempVol;
+			naturalCOM += tempVol * tetCentroid;
+
 		}
 
-		mesh = Mesh( 0, V0, F0, objV, objF, objT, density, false, offset, orientation );
+		naturalCOM.array() /= vol;
+
+		//fixing weird orientation problem
+		{
+			MatrixXi tempF(objF.rows(), 3);
+			tempF << objF.col(2), objF.col(1), objF.col(0);
+			objF = tempF;
+		}
+
+		mesh = Mesh( 0, V0, F0, objV, objF, objT, density, true, offset + QRot(naturalCOM, orientation), orientation );
 		return true;
 	}
 
@@ -498,9 +516,9 @@ public:
 			Vector3d line2 = p0 - p2;
 
 			// TODO: Check order of cross prod
-			Vector3d planeNorm0 = impulse.cross( line0.normalized() );
-			Vector3d planeNorm1 = impulse.cross( line1.normalized() );
-			Vector3d planeNorm2 = impulse.cross( line2.normalized() );
+			RowVector3d planeNorm0 = impulse.cross( line0.normalized() ).transpose();
+			RowVector3d planeNorm1 = impulse.cross( line1.normalized() ).transpose();
+			RowVector3d planeNorm2 = impulse.cross( line2.normalized() ).transpose();
 
 			//TODO when overriding V0, F0, some old data may not be replaced/removed
 			MatrixXd V0;
@@ -510,21 +528,33 @@ public:
 			MatrixXd V2;
 			MatrixXi F2;
 			MatrixXd J;
-			igl::copyleft::cgal::intersect_with_half_space( mesh.realOrigV, mesh.realF, p0, planeNorm0, V0, F0, J );
+			const bool i1 = igl::copyleft::cgal::intersect_with_half_space( mesh.realOrigV, mesh.realF, p0, planeNorm0, V0, F0, J );
+			if (!i1) {
+				std::cout << "\tDissapeard Piece! x1 wot" << std::endl;
+				continue;
+			}
 			if (F0.rows() == 0) { 
-				std::cout << "Dissapeard Piece!" << std::endl;
+				std::cout << "\tDissapeard Piece! x1" << std::endl;
 				continue; 
 			}
 
-			igl::copyleft::cgal::intersect_with_half_space( V0, F0, p1, planeNorm1, V1, F1, J );
+			const bool i2 = igl::copyleft::cgal::intersect_with_half_space( V0, F0, p1, planeNorm1, V1, F1, J );
+			if (!i2) {
+				std::cout << "\tDissapeard Piece! x2 wot" << std::endl;
+				continue;
+			}
 			if ( F1.rows() == 0 ) {
-				std::cout << "Dissapeard Piece!" << std::endl;
+				std::cout << "\tDissapeard Piece! x2" << std::endl;
 				continue;
 			}
 
-			igl::copyleft::cgal::intersect_with_half_space( V1, F1, p2, planeNorm2, V2, F2, J );
+			const bool i3 = igl::copyleft::cgal::intersect_with_half_space( V1, F1, p2, planeNorm2, V2, F2, J );
+			if (!i3) {
+				std::cout << "\tDissapeard Piece! x3 wot" << std::endl;
+				continue;
+			}
 			if ( F2.rows() == 0 ) {
-				std::cout << "Dissapeard Piece!" << std::endl;
+				std::cout << "\tDissapeard Piece! x3" << std::endl;
 				continue;
 			}
 
