@@ -68,3 +68,11 @@ mesh_i2 vertex_i2 mesh_j2 vertex_j2
 
 Each row is a constraint attaching the vertex ```vertex_i1``` of mesh ```mesh_i1``` to ```vertex_j2``` of mesh ```mesh_j2```. Every row is an independent such constraint. You can find TXT files in the data folder with similar name to the scenes they accompany. You can of course write new ones. Note that the meshes start indexing from $1$---if you put a constraint to mesh $0$, it will get attached to the platform (which should still work).
 
+### Note
+
+Our algorithm required some functionality from cgal. This library requires the use of boost however. Because we did not want our project to depend on boost, we have spend a lot of time trying to find an alternative. Unfortunately, we were unable to find it.
+
+We also ran into a problem where the executable was unable to find a certain dll. This should be fixed now by some lines we added in the cmake file.
+
+Lastly, the code is a bit slow and the 'impact plane' projection is not quite accurate. In the end, we had too little time to fix these issues.
+
