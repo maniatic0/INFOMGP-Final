@@ -1,3 +1,7 @@
+![exploding](https://user-images.githubusercontent.com/72574257/114452516-d133b480-9bd8-11eb-996f-5461fbcff176.png)
+
+
+
 # Practical 2: Constraints
 
 ## Handout date: 8/Mar/2021.
