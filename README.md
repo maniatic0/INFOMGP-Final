@@ -10,6 +10,7 @@ The project was built upon the second practical from the course.
 ## Installation
 
 For successful compilation, it is necessary to have the latest version of boost (https://www.boost.org/users/download/) installed on your root directory, e.g. c:\boost\. Note that the boost directory should be renamed to just 'boost', without the version numbering.
+We used the bunny-scene for testing.
 
 *The rest of the installation is exactly like that of Practical 2, repeated here for completeness*
 
