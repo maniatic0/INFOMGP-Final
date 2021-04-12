@@ -459,6 +459,7 @@ public:
 		const size_t siteCount = std::floor(siteMaxNumber * std::tanh( impulseNorm / breakImpulseMagnitude ) );
 		if ( siteCount < 4 ) return false;
 		std::cout << "\tNumber of Sites: " << siteCount << std::endl;
+		std::cout << "\Impulse: " << impulseNorm << std::endl;
 
 		MatrixXd sites = MatrixXd::Zero( siteCount, 2 );
 		MatrixXi faces;
