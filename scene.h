@@ -397,17 +397,11 @@ public:
 		igl::copyleft::cgal::remesh_self_intersections(V0,F0,params,VV,FF,IF,H,IM);
 		std::for_each(FF.data(),FF.data()+FF.size(),[&IM](int & a){a=IM(a);});
 		igl::remove_unreferenced(VV,FF,SV,SF,UIM);
-		//igl::copyleft::cgal::outer_hull_legacy(SV,SF,G,J,flip);
 
-		try {
-			const int k = igl::copyleft::tetgen::tetrahedralize( SV, SF, "pYQ", objV, objT, objF );
+		const int k = igl::copyleft::tetgen::tetrahedralize( SV, SF, "pYQ", objV, objT, objF );
 
-			if ( k != 0 ) {
-				std::cout << "\tTetgen failed with mesh: " << ( l - 1 ) << std::endl;
-				return false;
-			}
-		} catch ( std::exception& e ) {
-			std::cout << "\tCRRRAAASSSSHHHH with mesh: " << ( l - 1 ) << std::endl;
+		if ( k != 0 ) {
+			std::cout << "\tTetgen failed with mesh: " << ( l - 1 ) << std::endl;
 			return false;
 		}
 
@@ -429,10 +423,10 @@ public:
 
 		if (vol < 5)
 		{
-			std::cout << "\tToo small :( " << vol << std::endl;
+			std::cout << "\tToo small Volume: " << vol << std::endl;
 			return false;
 		}
-		std::cout << "\tNice Volume :) " << vol << std::endl;
+		std::cout << "\tNice Volume: " << vol << std::endl;
 
 		//fixing weird orientation problem
 		{
@@ -461,17 +455,10 @@ public:
 		const double impulseNorm    = impulse.norm();
 		assert( breakImpulseMagnitude > 0 );
 
-		//if ( impulse.norm() < breakImpulseMagnitude ) return false;
-
-		//TODO determine siteCount
-
-		//std::cout << "Tanh: " << std::tanh( impulseNorm / breakImpulseMagnitude ) << std::endl;
-
 		const double siteMaxNumber = 8.0;
 		const size_t siteCount = std::floor(siteMaxNumber * std::tanh( impulseNorm / breakImpulseMagnitude ) );
-		//std::cout << "Number of Sites: " << siteCount << std::endl;
 		if ( siteCount < 4 ) return false;
-		std::cout << "Number of Sites: " << siteCount << std::endl;
+		std::cout << "\tNumber of Sites: " << siteCount << std::endl;
 
 		MatrixXd sites = MatrixXd::Zero( siteCount, 2 );
 		MatrixXi faces;
@@ -487,7 +474,6 @@ public:
 		Vector3d VMin1 = mesh.origV.colwise().minCoeff().transpose() - lp;
 		Vector3d VMax1 = mesh.origV.colwise().maxCoeff().transpose() - lp;
 
-		//TODO what is this?
 		VMin1 -= VMin1.dot( n ) * n;
 		VMax1 -= VMax1.dot( n ) * n;
 
@@ -500,7 +486,6 @@ public:
 		Vector3d nx = localRot * diagNormalized;
 		Vector3d ny = localRot.inverse() * diagNormalized;
 
-		//TODO is this correct???
 		// Bounding box
 		//
 		Vector2d min2d = Vector2d(std::numeric_limits<double>().infinity(), std::numeric_limits<double>().infinity());
@@ -527,10 +512,7 @@ public:
 			double   dist  = 0.5 * ( sites.row( 1 ) - sites.row( 0 ) ).norm() * std::abs( NormalizedRandom( 0.5f, 1.0f / 2.0f ) );
 			double   angle = 2.0 * M_PI * Random();
 			Vector2d pos   = Vector2d( dist * std::cos( angle ), dist * std::sin( angle ) );
-			//pos            = pos.cwiseMin( max2d );
-			//pos            = pos.cwiseMax( min2d );
 			sites.row( i ) = pos;
-			// TODO: Get distance to border, use cwiseMax and cwiseMin
 		}
 
 		igl::copyleft::cgal::delaunay_triangulation( sites, faces );
@@ -549,7 +531,6 @@ public:
 			RowVector3d planeNorm1 = impulse.cross( line1.normalized() ).transpose();
 			RowVector3d planeNorm2 = impulse.cross( line2.normalized() ).transpose();
 
-			//TODO when overriding V0, F0, some old data may not be replaced/removed
 			MatrixXd   V0;
 			MatrixXi   F0;
 			MatrixXd   V1;
@@ -559,31 +540,31 @@ public:
 			MatrixXd   J;
 			const bool i1 = igl::copyleft::cgal::intersect_with_half_space( mesh.origV, mesh.F, p0, planeNorm0, V0, F0, J );
 			if ( !i1 ) {
-				//std::cout << "\tDissapeard Piece! x1 wot" << std::endl;
+				std::cout << "\tDissapeard Piece! x1 Failed" << std::endl;
 				continue;
 			}
 			if ( F0.rows() == 0 ) {
-				//std::cout << "\tDissapeard Piece! x1" << std::endl;
+				std::cout << "\tDissapeard Piece! x1" << std::endl;
 				continue;
 			}
 
 			const bool i2 = igl::copyleft::cgal::intersect_with_half_space( V0, F0, p1, planeNorm1, V1, F1, J );
 			if ( !i2 ) {
-				//std::cout << "\tDissapeard Piece! x2 wot" << std::endl;
+				std::cout << "\tDissapeard Piece! x2 Failed" << std::endl;
 				continue;
 			}
 			if ( F1.rows() == 0 ) {
-				//std::cout << "\tDissapeard Piece! x2" << std::endl;
+				std::cout << "\tDissapeard Piece! x2" << std::endl;
 				continue;
 			}
 
 			const bool i3 = igl::copyleft::cgal::intersect_with_half_space( V1, F1, p2, planeNorm2, V2, F2, J );
 			if ( !i3 ) {
-				//std::cout << "\tDissapeard Piece! x3 wot" << std::endl;
+				std::cout << "\tDissapeard Piece! x3 Failed" << std::endl;
 				continue;
 			}
 			if ( F2.rows() == 0 ) {
-				//std::cout << "\tDissapeard Piece! x3" << std::endl;
+				std::cout << "\tDissapeard Piece! x3" << std::endl;
 				continue;
 			}
 
@@ -631,7 +612,7 @@ public:
 	You are not allowed to use practical 1 collision handling
 	*********************************************************************/
 
-	size_t k_frameProtection = 20;
+	size_t k_frameProtection = 40;
 
 	void handleCollision( Mesh& m1, Mesh& m2, vector<size_t>& remove, vector<Mesh>& toAdd, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance ) {
 		//std::cout<<"contactNormal: "<<contactNormal<<std::endl;
