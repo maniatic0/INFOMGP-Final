@@ -73,26 +73,28 @@ void updateMeshes(igl::opengl::glfw::Viewer &viewer)
   viewer.data_list.resize( scene.meshes.size() + 1);
 
   const auto platMeshIter = scene.meshes.find(1);
-  int i = 0;
+  int i = 1;
   for (auto it0 = scene.meshes.begin(); it0 != scene.meshes.end(); ++it0)
   {
-      if (it0->second.name > 0)
+      if (it0->second.name > 0 && it0 != platMeshIter)
       {
           viewer.data_list[i].clear();
-          viewer.data_list[i].set_mesh(it0->second.realV, it0->second.realF);
+          viewer.data_list[i].set_mesh(it0->second.currV, it0->second.F);
           viewer.data_list[i].set_face_based(true);
           viewer.data_list[i].set_colors(meshColor);
           viewer.data_list[i].show_lines = false;
           i++;
       }
   }
-  viewer.data_list.resize(i + 1);
+  //viewer.data_list.resize(i + 1);
   
   if (platMeshIter != scene.meshes.end())
   {
-      viewer.core().align_camera_center(platMeshIter->second.realV);
+      viewer.core().align_camera_center(platMeshIter->second.currV);
+      viewer.data_list[0].clear();
+      viewer.data_list[0].set_mesh(platMeshIter->second.currV, platMeshIter->second.F);
       viewer.data_list[0].show_lines = false;
-      viewer.data_list[0].set_colors(platColor.replicate(platMeshIter->second.realF.rows(), 1));
+      viewer.data_list[0].set_colors(platColor.replicate(platMeshIter->second.F.rows(), 1));
       viewer.data_list[0].set_face_based(true);
   }
   
@@ -201,7 +203,7 @@ int main(int argc, char *argv[])
   cout<<"scene file: "<<std::string(argv[2])<<endl;
   //create platform
   createPlatform();
-  scene.addMesh(platV, platF, platV, platF, platT, 10000.0, true, platCOM, platOrientation);
+  scene.addMesh(platV, platF, platT, 10000.0, true, platCOM, platOrientation);
   
   //load scene from file
   scene.loadScene(std::string(argv[1]),std::string(argv[2]),std::string(argv[3]));

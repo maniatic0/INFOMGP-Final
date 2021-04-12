@@ -20,6 +20,7 @@
 #include <igl/remove_duplicate_vertices.h>
 #include <igl/resolve_duplicated_faces.h>
 #include <igl/copyleft/cgal/convex_hull.h>
+#include <igl/copyleft/cgal/remesh_self_intersections.h>
 
 #include <igl/copyleft/cgal/intersect_with_half_space.h>
 
@@ -40,7 +41,7 @@ typedef std::pair<RowVector3d, RowVector3d> Impulse;
 
 #define FIX_RNG 1
 #if FIX_RNG
-static std::mt19937 rng = std::mt19937( 0 );
+static std::mt19937 rng = std::mt19937( 1 );
 #else
 static std::mt19937 rng = std::mt19937(time(0));
 #endif
@@ -53,15 +54,12 @@ class Mesh
 public:
 	size_t name;
 	double density;
+	size_t lifetime;
 
 	MatrixXd origV; //original vertex positions, where COM=(0.0,0.0,0.0) - never change this!
 	MatrixXd currV; //current vertex position
 	MatrixXi F;     //faces of the tet mesh
 	MatrixXi T;     //Tets in the tet mesh
-	MatrixXd realOrigV; // real mesh
-	MatrixXd realV; // real mesh
-	MatrixXi realF; // real faces
-
 
 	VectorXi boundTets; //indices (from T) of just the boundary tets, for collision
 
@@ -189,9 +187,6 @@ public:
 
 		for ( int i = 0; i < currV.rows(); i++ )
 			currV.row( i ) << QRot( origV.row( i ), orientation ) + COM;
-
-		for (int i = 0; i < realV.rows(); i++)
-			realV.row( i ) << QRot(realOrigV.row(i), orientation) + COM;
 	}
 
 
@@ -256,7 +251,6 @@ public:
 	//Updating the linear and angular velocities of the object
 	//You need to modify this to integrate from acceleration in the field (basically gravity)
 	void updateVelocity( double timeStep ) {
-
 		if ( isFixed )
 			return;
 
@@ -278,10 +272,8 @@ public:
 	}
 
 
-	Mesh( const size_t _name, const MatrixXd& _realV, const MatrixXi& _realF, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double _density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation ) {
+	Mesh( const size_t _name, const MatrixXd& _V, const MatrixXi& _F, const MatrixXi& _T, const double _density, const bool _isFixed, const RowVector3d& _COM, const RowVector4d& _orientation ) {
 		name        = _name;
-		realOrigV	= _realV;
-		realF		= _realF;
 		density     = _density;
 		origV       = _V;
 		F           = _F;
@@ -291,6 +283,7 @@ public:
 		orientation = _orientation;
 		comVelocity.setZero();
 		angVelocity.setZero();
+		lifetime = 0;
 
 		RowVector3d naturalCOM; //by the geometry of the object
 
@@ -298,16 +291,10 @@ public:
 		naturalCOM = initStaticProperties( _density );
 
 		origV.rowwise() -= naturalCOM; //removing the natural COM of the OFF file (natural COM is never used again)
-		realOrigV.rowwise() -= naturalCOM;
 
 		currV.resize( origV.rows(), origV.cols() );
 		for ( int i = 0; i < currV.rows(); i++ )
 			currV.row( i ) << QRot( origV.row( i ), orientation ) + COM;
-
-		realV.resize(realOrigV.rows(), realOrigV.cols());
-		for (int i = 0; i < realOrigV.rows(); i++)
-			realV.row(i) << QRot(realOrigV.row(i), orientation) + COM;
-
 
 		VectorXi boundVMask( origV.rows() );
 		boundVMask.setZero();
@@ -357,11 +344,10 @@ public:
 	vector<Constraint> constraints; //The (user) constraints of the scene
 
 	//adding an objects. You do not need to update this generally
-	void addMesh(const MatrixXd& realV, const MatrixXi& realF, const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation ) {
-
+	void addMesh( const MatrixXd& V, const MatrixXi& F, const MatrixXi& T, const double density, const bool isFixed, const RowVector3d& COM, const RowVector4d& orientation ) {
 		size_t name = meshNum++;
 		std::cout << "Added mesh: " << name << std::endl;
-		Mesh   m( name, realV, realF, V, F, T, density, isFixed, COM, orientation );
+		Mesh m( name, V, F, T, density, isFixed, COM, orientation );
 		meshes.emplace( name, m );
 	}
 
@@ -381,6 +367,11 @@ public:
 		return dis( rng );
 	}
 
+	static double RandomUniform( double min, double max ) {
+		static std::uniform_real_distribution<double> dis( 0, 1 );
+		return min + ( max - min ) * dis( rng );
+	}
+
 	static double NormalizedRandom( double mean, double stddev ) {
 		double u1 = Random();
 		double u2 = Random();
@@ -392,74 +383,85 @@ public:
 	}
 
 	int l = 0;
+
 	bool PrepareMesh( Mesh& mesh, const MatrixXd& V0, const MatrixXi& F0, const RowVector3d& offset, const RowVector4d& orientation, const double density ) {
 		// New Mesh
 		MatrixXi objT, objF;
 		MatrixXd objV;
 
-		/*
-		std::string str = "newmesh";
-		str += std::to_string( l++ );
-		str += ".off";
-		igl::writeOFF( str.c_str(), V0, F0 );
-		*/
+		MatrixXd SV, VV;
+		MatrixXi SF, FF, IF, G, J, flip;
+		VectorXi H,IM, UIM;
+		igl::copyleft::cgal::RemeshSelfIntersectionsParam params;
+		params.detect_only = false;
+		igl::copyleft::cgal::remesh_self_intersections(V0,F0,params,VV,FF,IF,H,IM);
+		std::for_each(FF.data(),FF.data()+FF.size(),[&IM](int & a){a=IM(a);});
+		igl::remove_unreferenced(VV,FF,SV,SF,UIM);
+		//igl::copyleft::cgal::outer_hull_legacy(SV,SF,G,J,flip);
 
-		MatrixXd V1;
-		MatrixXi F1;
-		igl::copyleft::cgal::convex_hull( V0, V1, F1 );
-		const int k = igl::copyleft::tetgen::tetrahedralize( V1, F1, "pYQ", objV, objT, objF );
-		if (k != 0) { 
-			std::cout << "\tTetgen failed with mesh: " << (l - 1) << std::endl;
-			return false; 
+		try {
+			const int k = igl::copyleft::tetgen::tetrahedralize( SV, SF, "pYQ", objV, objT, objF );
+
+			if ( k != 0 ) {
+				std::cout << "\tTetgen failed with mesh: " << ( l - 1 ) << std::endl;
+				return false;
+			}
+		} catch ( std::exception& e ) {
+			std::cout << "\tCRRRAAASSSSHHHH with mesh: " << ( l - 1 ) << std::endl;
+			return false;
 		}
 
 		RowVector3d naturalCOM;
-		double vol = 0;
+		double      vol = 0;
 		naturalCOM.setZero();
-		for (int i = 0; i < objT.rows(); i++) {
-			Vector3d e01 = objV.row(objT(i, 1)) - objV.row(objT(i, 0));
-			Vector3d e02 = objV.row(objT(i, 2)) - objV.row(objT(i, 0));
-			Vector3d e03 = objV.row(objT(i, 3)) - objV.row(objT(i, 0));
-			Vector3d tetCentroid = (objV.row(objT(i, 0)) + objV.row(objT(i, 1)) + objV.row(objT(i, 2)) + objV.row(objT(i, 3))) / 4.0;
+		for ( int i = 0; i < objT.rows(); i++ ) {
+			Vector3d e01         = objV.row( objT( i, 1 ) ) - objV.row( objT( i, 0 ) );
+			Vector3d e02         = objV.row( objT( i, 2 ) ) - objV.row( objT( i, 0 ) );
+			Vector3d e03         = objV.row( objT( i, 3 ) ) - objV.row( objT( i, 0 ) );
+			Vector3d tetCentroid = ( objV.row( objT( i, 0 ) ) + objV.row( objT( i, 1 ) ) + objV.row( objT( i, 2 ) ) + objV.row( objT( i, 3 ) ) ) / 4.0;
 
-			const double tempVol = std::abs(e01.dot(e02.cross(e03))) / 6.0;
+			const double tempVol = std::abs( e01.dot( e02.cross( e03 ) ) ) / 6.0;
 			vol += tempVol;
 			naturalCOM += tempVol * tetCentroid;
-
 		}
 
 		naturalCOM.array() /= vol;
 
 		//fixing weird orientation problem
 		{
-			MatrixXi tempF(objF.rows(), 3);
-			tempF << objF.col(2), objF.col(1), objF.col(0);
+			MatrixXi tempF( objF.rows(), 3 );
+			tempF << objF.col( 2 ), objF.col( 1 ), objF.col( 0 );
 			objF = tempF;
 		}
 
-		mesh = Mesh( 0, V0, F0, objV, objF, objT, density, false, offset + QRot(naturalCOM, orientation), orientation );
+		mesh = Mesh( 0, objV, objF, objT, density, false, offset + QRot( naturalCOM, orientation ), orientation );
 		return true;
 	}
 
-	static Vector2d Cross2d( Vector2d a, Vector2d b ){
-		return Vector2d( a.x() * b.y(), -b.x() * a.y());
+	static Vector2d Cross2d( Vector2d a, Vector2d b ) {
+		return Vector2d( a.x() * b.y(), -b.x() * a.y() );
 	}
 
-	bool BreakMesh( const Mesh& mesh, std::vector<Mesh>& toAdd, const Vector3d& penPosition, const Vector3d& newCOMPosition, 
-			const Vector3d& newCOMVelocity, const Vector3d& newAngVelocity) {
+	bool BreakMesh( const Mesh&     mesh, std::vector<Mesh>&        toAdd, const Vector3d& penPosition, const Vector3d& newCOMPosition,
+					const Vector3d& newCOMVelocity, const Vector3d& newAngVelocity ) {
 
-		size_t meshCount = toAdd.size();
-		Vector3d arm            = penPosition - newCOMPosition;
-		Vector3d linearVelDelta = newCOMVelocity - mesh.comVelocity.transpose();
-		Vector3d angVelDelta    = newAngVelocity - mesh.angVelocity.transpose();
-		Vector3d impulse        = mesh.totalMass * ( linearVelDelta + angVelDelta.cross( arm ) );
-		const double impulseNorm = impulse.norm();
-		assert(breakImpulseMagnitude > 0);
-		if ( impulse.norm() < breakImpulseMagnitude ) return false;
+		size_t       meshCount      = toAdd.size();
+		Vector3d     arm            = penPosition - mesh.COM.transpose();
+		Vector3d     linearVelDelta = newCOMVelocity - mesh.comVelocity.transpose();
+		Vector3d     angVelDelta    = newAngVelocity - mesh.angVelocity.transpose();
+		Vector3d     impulse        = mesh.totalMass * ( linearVelDelta + angVelDelta.cross( arm ) );
+		const double impulseNorm    = impulse.norm();
+		assert( breakImpulseMagnitude > 0 );
+		//if ( impulse.norm() < breakImpulseMagnitude ) return false;
 
-		const size_t siteCount = 4 + (size_t)round(impulseNorm / breakImpulseMagnitude * (1.0 + 0.3 * Random()));
+		//TODO determine siteCount
+
+		//std::cout << "Tanh: " << std::tanh( impulseNorm / breakImpulseMagnitude ) << std::endl;
+
+		const size_t siteCount = std::floor( 8.0 * std::tanh( impulseNorm / breakImpulseMagnitude ) );
+		//std::cout << "Number of Sites: " << siteCount << std::endl;
+		if ( siteCount < 4 ) return false;
 		std::cout << "Number of Sites: " << siteCount << std::endl;
-		assert(siteCount >= 4);
 
 		MatrixXd sites = MatrixXd::Zero( siteCount, 2 );
 		MatrixXi faces;
@@ -470,118 +472,112 @@ public:
 
 		// Impulse plane
 		Vector3d lp = roti * ( penPosition - newCOMPosition );
-		Vector3d n = ( roti * impulse ) / impulseNorm;
+		Vector3d n  = ( roti * impulse ) / impulseNorm;
 
-		Vector3d VMin1 = mesh.realOrigV.colwise().minCoeff().transpose() - lp;
-		Vector3d VMax1 = mesh.realOrigV.colwise().maxCoeff().transpose() - lp;
+		Vector3d VMin1 = mesh.origV.colwise().minCoeff().transpose() - lp;
+		Vector3d VMax1 = mesh.origV.colwise().maxCoeff().transpose() - lp;
 
-		VMin1 -= VMin1.dot(n) * n;
-		VMax1 -= VMax1.dot(n) * n;
+		//TODO what is this?
+		VMin1 -= VMin1.dot( n ) * n;
+		VMax1 -= VMax1.dot( n ) * n;
 
-		Vector3d newMax = VMax1.cwiseMax(VMin1);
-		Vector3d newMin = VMax1.cwiseMin(VMin1);
-		Vector3d diag = newMax - newMin;
-		Vector3d diagNormalized = diag.normalized();
-		AngleAxisd localRot = AngleAxisd(0.25 * M_PI, n);
+		Vector3d   newMax         = VMax1.cwiseMax( VMin1 );
+		Vector3d   newMin         = VMax1.cwiseMin( VMin1 );
+		Vector3d   diag           = newMax - newMin;
+		Vector3d   diagNormalized = diag.normalized();
+		AngleAxisd localRot       = AngleAxisd( 0.25 * M_PI, n );
 
 		Vector3d nx = localRot * diagNormalized;
 		Vector3d ny = localRot.inverse() * diagNormalized;
 
+		//TODO is this correct???
 		// Bounding box
-		Vector2d min2d = Vector2d(newMin.dot(nx), newMin.dot(ny));
-		Vector2d max2d = Vector2d(newMax.dot(nx), newMax.dot(ny));
-		sites.row( 0 ) = min2d;       // min-min
-		sites.row( 1 ) = max2d;       // max-max
+		//
+
+		Vector2d min2d = Vector2d( newMin.dot( nx ), newMin.dot( ny ) );
+		Vector2d max2d = Vector2d( newMax.dot( nx ), newMax.dot( ny ) );
+		sites.row( 0 ) = min2d;                                              // min-min
+		sites.row( 1 ) = max2d;                                              // max-max
 		sites.row( 2 ) = Vector2d( sites.row( 0 ).x(), sites.row( 1 ).y() ); // min-max
 		sites.row( 3 ) = Vector2d( sites.row( 1 ).x(), sites.row( 0 ).y() ); // max-min
 
 		// Random sites
-		label_a:
 		for ( int i = 4; i < siteCount; ++i ) {
-			double dist  = 0.5 * (sites.row( 1 ) - sites.row( 0 )).norm() * std::abs( NormalizedRandom( 0.5f, 1.0f / 2.0f ) );
-			double angle = 2.0 * M_PI * Random();
-
-			sites.row( i ) = Vector2d( dist * std::cos( angle ), dist * std::sin( angle ) );
+			double   dist  = 0.5 * ( sites.row( 1 ) - sites.row( 0 ) ).norm() * std::abs( NormalizedRandom( 0.5f, 1.0f / 2.0f ) );
+			double   angle = 2.0 * M_PI * Random();
+			Vector2d pos   = Vector2d( dist * std::cos( angle ), dist * std::sin( angle ) );
+			//pos            = pos.cwiseMin( max2d );
+			//pos            = pos.cwiseMax( min2d );
+			sites.row( i ) = pos;
 			// TODO: Get distance to border, use cwiseMax and cwiseMin
 		}
 
 		igl::copyleft::cgal::delaunay_triangulation( sites, faces );
 
-		for(int i = 0; i < faces.rows(); ++i) {
-			Vector3i face = faces.row( i );
-			Vector2d p0 = sites.row( face[0] );
-			Vector2d p1 = sites.row( face[1] );
-			Vector2d p2 = sites.row( face[2] );
-			double m = 0.1 * (sites.row( 3 ).x() - sites.row( 0 ).x()) * (sites.row( 2 ).y() - sites.row( 0 ).y());
-			
-			if ( 0.5 * Cross2d(p0 - p1, p0 - p2 ).norm() < m) goto label_a;
-		}
-
 		for ( int i = 0; i < faces.rows(); ++i ) {
 			Vector3i face = faces.row( i );
 
-			Vector3d p0 = lp + sites.row( face[0] ).coeff( 0 ) * nx + sites.row( face[0] ).coeff( 1 ) * ny;
-			Vector3d p1 = lp + sites.row( face[1] ).coeff( 0 ) * nx + sites.row( face[1] ).coeff( 1 ) * ny;
-			Vector3d p2 = lp + sites.row( face[2] ).coeff( 0 ) * nx + sites.row( face[2] ).coeff( 1 ) * ny;
+			Vector3d p0    = lp + sites.row( face[0] ).coeff( 0 ) * nx + sites.row( face[0] ).coeff( 1 ) * ny;
+			Vector3d p1    = lp + sites.row( face[1] ).coeff( 0 ) * nx + sites.row( face[1] ).coeff( 1 ) * ny;
+			Vector3d p2    = lp + sites.row( face[2] ).coeff( 0 ) * nx + sites.row( face[2] ).coeff( 1 ) * ny;
 			Vector3d line0 = p1 - p0;
 			Vector3d line1 = p2 - p1;
 			Vector3d line2 = p0 - p2;
 
-			// TODO: Check order of cross prod
 			RowVector3d planeNorm0 = impulse.cross( line0.normalized() ).transpose();
 			RowVector3d planeNorm1 = impulse.cross( line1.normalized() ).transpose();
 			RowVector3d planeNorm2 = impulse.cross( line2.normalized() ).transpose();
 
 			//TODO when overriding V0, F0, some old data may not be replaced/removed
-			MatrixXd V0;
-			MatrixXi F0;
-			MatrixXd V1;
-			MatrixXi F1;
-			MatrixXd V2;
-			MatrixXi F2;
-			MatrixXd J;
-			const bool i1 = igl::copyleft::cgal::intersect_with_half_space( mesh.realOrigV, mesh.realF, p0, planeNorm0, V0, F0, J );
-			if (!i1) {
-				std::cout << "\tDissapeard Piece! x1 wot" << std::endl;
+			MatrixXd   V0;
+			MatrixXi   F0;
+			MatrixXd   V1;
+			MatrixXi   F1;
+			MatrixXd   V2;
+			MatrixXi   F2;
+			MatrixXd   J;
+			const bool i1 = igl::copyleft::cgal::intersect_with_half_space( mesh.origV, mesh.F, p0, planeNorm0, V0, F0, J );
+			if ( !i1 ) {
+				//std::cout << "\tDissapeard Piece! x1 wot" << std::endl;
 				continue;
 			}
-			if (F0.rows() == 0) { 
-				std::cout << "\tDissapeard Piece! x1" << std::endl;
-				continue; 
+			if ( F0.rows() == 0 ) {
+				//std::cout << "\tDissapeard Piece! x1" << std::endl;
+				continue;
 			}
 
 			const bool i2 = igl::copyleft::cgal::intersect_with_half_space( V0, F0, p1, planeNorm1, V1, F1, J );
-			if (!i2) {
-				std::cout << "\tDissapeard Piece! x2 wot" << std::endl;
+			if ( !i2 ) {
+				//std::cout << "\tDissapeard Piece! x2 wot" << std::endl;
 				continue;
 			}
 			if ( F1.rows() == 0 ) {
-				std::cout << "\tDissapeard Piece! x2" << std::endl;
+				//std::cout << "\tDissapeard Piece! x2" << std::endl;
 				continue;
 			}
 
 			const bool i3 = igl::copyleft::cgal::intersect_with_half_space( V1, F1, p2, planeNorm2, V2, F2, J );
-			if (!i3) {
-				std::cout << "\tDissapeard Piece! x3 wot" << std::endl;
+			if ( !i3 ) {
+				//std::cout << "\tDissapeard Piece! x3 wot" << std::endl;
 				continue;
 			}
 			if ( F2.rows() == 0 ) {
-				std::cout << "\tDissapeard Piece! x3" << std::endl;
+				//std::cout << "\tDissapeard Piece! x3" << std::endl;
 				continue;
 			}
 
 			VectorXi CF;
 			igl::facet_components( F2, CF );
 
-			for ( int j = 0; j <= CF.maxCoeff(); ++j ) {				
-				MatrixXd V3 = V2;	
-				vector<RowVector3i> Fs = {};
+			for ( int j = 0; j <= CF.maxCoeff(); ++j ) {
+				MatrixXd            V3 = V2;
+				vector<RowVector3i> Fs = { };
 				for ( int k = 0; k < CF.size(); ++k ) {
-					if ( CF.coeff( k ) == j ) Fs.push_back( F2.row(k) );
+					if ( CF.coeff( k ) == j ) Fs.push_back( F2.row( k ) );
 				}
 
 				MatrixXi F3 = MatrixXi::Zero( Fs.size(), F2.cols() );
-				for( int k = 0; k < Fs.size(); ++k ) F3.row( k ) = Fs[k];
+				for ( int k = 0; k < Fs.size(); ++k ) F3.row( k ) = Fs[k];
 
 				MatrixXd V4;
 				MatrixXi F4;
@@ -589,21 +585,10 @@ public:
 				VectorXi J;
 				igl::remove_unreferenced( V3, F3, V4, F4, I, J );
 
-				
-
-				//MatrixXi F5;
-				//igl::resolve_duplicated_faces( F4, F5, J );
-
-				//MatrixXd V5;
-				//MatrixXi F6;
-				//VectorXi VI;
-				//VectorXi VJ;
-				//igl::remove_duplicate_vertices( V4, F5, 0.1, V5, VI, VJ, F6 );
-				
 				Mesh rmesh;
 				bool result = PrepareMesh( rmesh, V4, F4, newCOMPosition.transpose(), mesh.orientation, mesh.density );
 				if ( result ) {
-					toAdd.push_back( std::move(rmesh) );
+					toAdd.push_back( std::move( rmesh ) );
 					toAdd[toAdd.size() - 1].comVelocity = newCOMVelocity;
 					toAdd[toAdd.size() - 1].angVelocity = newAngVelocity;
 				}
@@ -625,6 +610,7 @@ public:
 	You are not allowed to use practical 1 collision handling
 	*********************************************************************/
 	bool protection = false;
+
 	void handleCollision( Mesh& m1, Mesh& m2, vector<size_t>& remove, vector<Mesh>& toAdd, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance ) {
 		//std::cout<<"contactNormal: "<<contactNormal<<std::endl;
 		//std::cout<<"penPosition: "<<penPosition<<std::endl;
@@ -651,9 +637,9 @@ public:
 			constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
 			constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
 
-			if ( !m1.isFixed) {
+			if ( !m1.isFixed && m1.lifetime > 10 ) {
 				const bool result = BreakMesh( m1, toAdd, penPosition.transpose(), correctedCOMPositions.row( 0 ).transpose(), correctedCOMVelocities.row( 0 ).transpose(),
-					correctedAngVelocities.row( 0 ).transpose());
+												correctedAngVelocities.row( 0 ).transpose() );
 
 				if ( result ) {
 					remove.push_back( m1.name );
@@ -669,9 +655,9 @@ public:
 				m1.angVelocity = correctedAngVelocities.row( 0 );
 			}
 
-			if ( !m2.isFixed) {
+			if ( !m2.isFixed && m2.lifetime > 10 ) {
 				const bool result = BreakMesh( m2, toAdd, penPosition.transpose(), correctedCOMPositions.row( 1 ).transpose(), correctedCOMVelocities.row( 1 ).transpose(),
-					correctedAngVelocities.row( 1 ).transpose());
+												correctedAngVelocities.row( 1 ).transpose() );
 
 				if ( result ) {
 					remove.push_back( m2.name );
@@ -835,12 +821,13 @@ public:
 		if ( currIteration * constraints.size() >= maxIterations )
 			cout << "Position Constraint resolution reached maxIterations without resolving!" << endl;
 
-
 		//updating currV according to corrected COM
-		for ( int i = 0; i < meshes.size(); i++ )
-			for ( int j = 0; j < meshes[i].currV.rows(); j++ )
-				meshes[i].currV.row( j ) << QRot( meshes[i].origV.row( j ), meshes[i].orientation ) + meshes[i].COM;
-
+		for ( auto& mesh : meshes ) {
+			for ( int j = 0; j < mesh.second.currV.rows(); j++ )
+				mesh.second.currV.row( j ) << QRot( mesh.second.origV.row( j ), mesh.second.orientation ) + mesh.second.COM;
+			++mesh.second.lifetime;
+		}
+			
 		currTime += timeStep;
 	}
 
@@ -872,7 +859,7 @@ public:
 			MatrixXd VOFF;
 			MatrixXi FOFF;
 			if ( MESHFileName.find( ".off" ) != std::string::npos ) {
-				
+
 				igl::readOFF( dataFolder + std::string( "/" ) + MESHFileName, VOFF, FOFF );
 				RowVectorXd mins = VOFF.colwise().minCoeff();
 				RowVectorXd maxs = VOFF.colwise().maxCoeff();
@@ -891,12 +878,12 @@ public:
 
 			//fixing weird orientation problem
 			{
-				MatrixXi tempF(objF.rows(), 3);
-				tempF << objF.col(2), objF.col(1), objF.col(0);
+				MatrixXi tempF( objF.rows(), 3 );
+				tempF << objF.col( 2 ), objF.col( 1 ), objF.col( 0 );
 				objF = tempF;
-			}			
+			}
 
-			addMesh(VOFF, FOFF, objV, objF, objT, density, isFixed, userCOM, userOrientation );
+			addMesh( objV, objF, objT, density, isFixed, userCOM, userOrientation );
 			cout << "COM: " << userCOM << endl;
 			cout << "orientation: " << userOrientation << endl;
 		}
