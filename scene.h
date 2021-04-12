@@ -39,7 +39,7 @@ void center( const void* _obj, ccd_vec3_t* dir );
 //Impulse is defined as a pair <position, direction>
 typedef std::pair<RowVector3d, RowVector3d> Impulse;
 
-#define FIX_RNG 1
+#define FIX_RNG 0
 #if FIX_RNG
 static std::mt19937 rng = std::mt19937( 1 );
 #else
@@ -467,7 +467,8 @@ public:
 
 		//std::cout << "Tanh: " << std::tanh( impulseNorm / breakImpulseMagnitude ) << std::endl;
 
-		const size_t siteCount = std::floor( 8.0 * std::tanh( impulseNorm / breakImpulseMagnitude ) );
+		const double siteMaxNumber = 8.0;
+		const size_t siteCount = std::floor(siteMaxNumber * std::tanh( impulseNorm / breakImpulseMagnitude ) );
 		//std::cout << "Number of Sites: " << siteCount << std::endl;
 		if ( siteCount < 4 ) return false;
 		std::cout << "Number of Sites: " << siteCount << std::endl;
@@ -629,7 +630,8 @@ public:
 	You should create a "Constraint" class, and use its resolveVelocityConstraint() and resolvePositionConstraint() *alone* to resolve the constraint.
 	You are not allowed to use practical 1 collision handling
 	*********************************************************************/
-	bool protection = false;
+
+	size_t k_frameProtection = 20;
 
 	void handleCollision( Mesh& m1, Mesh& m2, vector<size_t>& remove, vector<Mesh>& toAdd, const double& depth, const RowVector3d& contactNormal, const RowVector3d& penPosition, const double CRCoeff, const double tolerance ) {
 		//std::cout<<"contactNormal: "<<contactNormal<<std::endl;
@@ -657,13 +659,12 @@ public:
 			constraint.resolvePositionConstraint( currCOMPositions, currConstPositions, correctedCOMPositions, tolerance );
 			constraint.resolveVelocityConstraint( currCOMPositions, currConstPositions, currCOMVelocities, currAngVelocities, invInertiaTensor1, invInertiaTensor2, correctedCOMVelocities, correctedAngVelocities, tolerance );
 
-			if ( !m1.isFixed && m1.lifetime > 10 ) {
+			if ( !m1.isFixed && m1.lifetime > k_frameProtection) {
 				const bool result = BreakMesh( m1, toAdd, penPosition.transpose(), correctedCOMPositions.row( 0 ).transpose(), correctedCOMVelocities.row( 0 ).transpose(),
 												correctedAngVelocities.row( 0 ).transpose() );
 
 				if ( result ) {
 					remove.push_back( m1.name );
-					protection = true;
 				} else {
 					m1.COM         = correctedCOMPositions.row( 0 );
 					m1.comVelocity = correctedCOMVelocities.row( 0 );
@@ -675,13 +676,12 @@ public:
 				m1.angVelocity = correctedAngVelocities.row( 0 );
 			}
 
-			if ( !m2.isFixed && m2.lifetime > 10 ) {
+			if ( !m2.isFixed && m2.lifetime > k_frameProtection) {
 				const bool result = BreakMesh( m2, toAdd, penPosition.transpose(), correctedCOMPositions.row( 1 ).transpose(), correctedCOMVelocities.row( 1 ).transpose(),
 												correctedAngVelocities.row( 1 ).transpose() );
 
 				if ( result ) {
 					remove.push_back( m2.name );
-					protection = true;
 				} else {
 					m2.COM         = correctedCOMPositions.row( 1 );
 					m2.comVelocity = correctedCOMVelocities.row( 1 );
