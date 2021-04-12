@@ -480,12 +480,46 @@ public:
 
 		Vector3d   newMax         = VMax1.cwiseMax( VMin1 );
 		Vector3d   newMin         = VMax1.cwiseMin( VMin1 );
-		Vector3d   diag           = newMax - newMin;
-		Vector3d   diagNormalized = diag.normalized();
-		AngleAxisd localRot       = AngleAxisd( 0.25 * M_PI, n );
 
-		Vector3d nx = localRot * diagNormalized;
-		Vector3d ny = localRot.inverse() * diagNormalized;
+		Vector3d nx;
+		Vector3d ny;
+
+		{
+			// From https://stackoverflow.com/questions/33531505/principal-component-analysis-with-eigen-library
+			Matrix3d traindata(8, 3);
+			for (size_t i = 0; i < 8; i++)
+			{
+				const double x = i & 1 ? newMin.x() : newMax.x();
+				const double y = i & 2 ? newMin.y() : newMax.y();
+				const double z = i & 4 ? newMin.z() : newMax.z();
+				traindata.row(i) = RowVector3d(x, y, z);
+			}
+
+			RowVectorXd maxCoeffs = traindata.colwise().maxCoeff();
+			RowVectorXd minCoeffs = traindata.colwise().minCoeff();
+			RowVectorXd scalingFactors = maxCoeffs - minCoeffs;
+			traindata = (traindata.rowwise() - minCoeffs).array().rowwise() / scalingFactors.array();
+
+			// Mean centering data.
+			RowVectorXd featureMeans = traindata.colwise().mean();
+			MatrixXd centered = traindata.rowwise() - featureMeans;
+
+			// Compute the covariance matrix.
+			MatrixXd cov = centered.adjoint() * centered;
+			cov = cov / (traindata.rows() - 1);
+
+			SelfAdjointEigenSolver<Eigen::MatrixXd> eig(cov);
+			// Normalize eigenvalues to make them represent percentages.
+			VectorXd normalizedEigenValues = eig.eigenvalues() / eig.eigenvalues().sum();
+			std::cout << "Eigen Values: \n" << normalizedEigenValues << std::endl;
+
+
+			// Get the two major eigenvectors and omit the others.
+			MatrixXd evecs = eig.eigenvectors();
+			MatrixXd pcaTransform = evecs.rightCols(2);
+			nx = pcaTransform.col(0).normalized();
+			ny = pcaTransform.col(1).normalized();
+		}
 
 		// Bounding box
 		//
@@ -503,8 +537,8 @@ public:
 			max2d = max2d.cwiseMax(corner2d);
 		}
 		
-		sites.row( 0 ) = min2d * 1.5;                                              // min-min
-		sites.row( 1 ) = max2d * 1.5;                                              // max-max
+		sites.row( 0 ) = min2d * 2;                                              // min-min
+		sites.row( 1 ) = max2d * 2;                                              // max-max
 		sites.row( 2 ) = Vector2d( sites.row( 0 ).x(), sites.row( 1 ).y() ); // min-max
 		sites.row( 3 ) = Vector2d( sites.row( 1 ).x(), sites.row( 0 ).y() ); // max-min
 
