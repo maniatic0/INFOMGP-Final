@@ -427,6 +427,13 @@ public:
 
 		naturalCOM.array() /= vol;
 
+		if (vol < 5)
+		{
+			std::cout << "\tToo small :( " << vol << std::endl;
+			return false;
+		}
+		std::cout << "\tNice Volume :) " << vol << std::endl;
+
 		//fixing weird orientation problem
 		{
 			MatrixXi tempF( objF.rows(), 3 );
@@ -435,6 +442,7 @@ public:
 		}
 
 		mesh = Mesh( 0, objV, objF, objT, density, false, offset + QRot( naturalCOM, orientation ), orientation );
+
 		return true;
 	}
 
@@ -452,6 +460,7 @@ public:
 		Vector3d     impulse        = mesh.totalMass * ( linearVelDelta + angVelDelta.cross( arm ) );
 		const double impulseNorm    = impulse.norm();
 		assert( breakImpulseMagnitude > 0 );
+
 		//if ( impulse.norm() < breakImpulseMagnitude ) return false;
 
 		//TODO determine siteCount
@@ -493,11 +502,22 @@ public:
 		//TODO is this correct???
 		// Bounding box
 		//
+		Vector2d min2d = Vector2d(std::numeric_limits<double>().infinity(), std::numeric_limits<double>().infinity());
+		Vector2d max2d = -min2d;
+		for (size_t i = 0; i < 8; i++)
+		{
+			const double x = i & 1 ? newMin.x() : newMax.x();
+			const double y = i & 2 ? newMin.y() : newMax.y();
+			const double z = i & 4 ? newMin.z() : newMax.z();
+			Vector3d corner(x, y, z);
+			Vector2d corner2d(corner.dot(nx), corner.dot(ny));
 
-		Vector2d min2d = Vector2d( newMin.dot( nx ), newMin.dot( ny ) );
-		Vector2d max2d = Vector2d( newMax.dot( nx ), newMax.dot( ny ) );
-		sites.row( 0 ) = min2d;                                              // min-min
-		sites.row( 1 ) = max2d;                                              // max-max
+			min2d = min2d.cwiseMin(corner2d);
+			max2d = max2d.cwiseMax(corner2d);
+		}
+		
+		sites.row( 0 ) = min2d * 1.5;                                              // min-min
+		sites.row( 1 ) = max2d * 1.5;                                              // max-max
 		sites.row( 2 ) = Vector2d( sites.row( 0 ).x(), sites.row( 1 ).y() ); // min-max
 		sites.row( 3 ) = Vector2d( sites.row( 1 ).x(), sites.row( 0 ).y() ); // max-min
 
@@ -587,7 +607,7 @@ public:
 
 				Mesh rmesh;
 				bool result = PrepareMesh( rmesh, V4, F4, newCOMPosition.transpose(), mesh.orientation, mesh.density );
-				if ( result ) {
+				if ( result) {
 					toAdd.push_back( std::move( rmesh ) );
 					toAdd[toAdd.size() - 1].comVelocity = newCOMVelocity;
 					toAdd[toAdd.size() - 1].angVelocity = newAngVelocity;
