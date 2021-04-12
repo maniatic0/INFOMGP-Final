@@ -528,9 +528,9 @@ public:
 			Vector3d line1 = p2 - p1;
 			Vector3d line2 = p0 - p2;
 
-			RowVector3d planeNorm0 = impulse.cross( line0.normalized() ).transpose();
-			RowVector3d planeNorm1 = impulse.cross( line1.normalized() ).transpose();
-			RowVector3d planeNorm2 = impulse.cross( line2.normalized() ).transpose();
+			RowVector3d planeNorm0 = n.cross( line0.normalized() ).transpose();
+			RowVector3d planeNorm1 = n.cross( line1.normalized() ).transpose();
+			RowVector3d planeNorm2 = n.cross( line2.normalized() ).transpose();
 
 			MatrixXd   V0;
 			MatrixXi   F0;
